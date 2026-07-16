@@ -280,7 +280,7 @@
           <button class="btn-secondary" onclick="openPlayerExternal()">外部播放器</button>
         </div>
         <div class="player-stage" id="mpvStage">
-          <div class="mpv-host-hint" id="mpvHint">mpv 播放器区域</div>
+          <div class="mpv-host-hint" id="mpvHint">mpv 将在独立窗口播放，下面按钮仍可控制进度和截封面</div>
         </div>
         <div class="player-controls">
           <div class="player-row">
@@ -945,7 +945,7 @@ async function openPlayer(episodeId) {
   if (!ep) return;
   state.player.episode = ep;
   document.getElementById('playerTitle').textContent = detail.work.title + ' / 第' + ep.number + '集';
-  document.getElementById('mpvHint').textContent = '正在启动 mpv...';
+  document.getElementById('mpvHint').textContent = '正在启动 mpv 独立播放窗口...';
   playerMessage('info', '正在启动 mpv 播放内核...');
   showPage('page-player');
   syncMpvBounds();
@@ -953,7 +953,7 @@ async function openPlayer(episodeId) {
   try {
     await invoke('start_embedded_mpv', { episodeId: ep.id });
     document.getElementById('mpvHint').textContent = '';
-    playerMessage('info', 'mpv 已启动');
+    playerMessage('info', 'mpv 已在独立窗口启动');
     syncMpvBounds();
     await setPlayerVolume(document.getElementById('playerVolume').value);
     await pollMpvStatus();

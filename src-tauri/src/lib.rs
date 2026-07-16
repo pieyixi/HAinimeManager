@@ -2,18 +2,10 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, Write};
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::State;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-#[cfg(target_os = "windows")]
-use windows_sys::Win32::Foundation::HWND;
-#[cfg(target_os = "windows")]
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, MoveWindow, SetWindowPos, ShowWindow, HWND_TOP, SWP_NOACTIVATE,
-    SWP_SHOWWINDOW, SW_HIDE, WS_CHILD, WS_CLIPSIBLINGS,
-};
-
 // ─── Data Models ──────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -2356,41 +2348,6 @@ fn mpv_path() -> Option<String> {
         .map(|path| path.to_string())
 }
 
-#[cfg(target_os = "windows")]
-fn wide_null(value: &str) -> Vec<u16> {
-    value.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-#[cfg(target_os = "windows")]
-fn create_mpv_host(parent_hwnd: HWND) -> Result<HWND, String> {
-    let class_name = wide_null("STATIC");
-    let title = wide_null("");
-    let hwnd = unsafe {
-        CreateWindowExW(
-            0,
-            class_name.as_ptr(),
-            title.as_ptr(),
-            WS_CHILD | WS_CLIPSIBLINGS,
-            0,
-            0,
-            1,
-            1,
-            parent_hwnd,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-        )
-    };
-    if hwnd.is_null() {
-        Err("创建 mpv 承载窗口失败".to_string())
-    } else {
-        unsafe {
-            ShowWindow(hwnd, SW_HIDE);
-        }
-        Ok(hwnd)
-    }
-}
-
 fn mpv_ipc_command(
     pipe_name: &str,
     command: serde_json::Value,
@@ -2454,7 +2411,7 @@ fn wait_for_mpv_ipc(pipe_name: &str, child: &mut std::process::Child) -> Result<
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn start_embedded_mpv(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     episode_id: i64,
     db: State<Database>,
     player: State<Mutex<MpvPlayerState>>,
@@ -2473,34 +2430,22 @@ fn start_embedded_mpv(
         .map_err(|e| e.to_string())?;
     drop(conn);
 
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "找不到主窗口".to_string())?;
-    let parent_hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as HWND;
-
     let mut state = player.lock().map_err(|e| e.to_string())?;
     if let Some(mut child) = state.child.take() {
         let _ = child.kill();
         let _ = child.wait();
     }
-    if state.host_hwnd != 0 {
-        unsafe {
-            DestroyWindow(state.host_hwnd as HWND);
-        }
-        state.host_hwnd = 0;
-    }
 
-    let host_hwnd = create_mpv_host(parent_hwnd)?;
     let pipe_name = format!(r"\\.\pipe\hanime_mpv_{}_{}", std::process::id(), episode_id);
     let mut child = match std::process::Command::new(&mpv)
-        .arg(format!("--wid={}", host_hwnd as isize))
         .arg(format!("--input-ipc-server={}", pipe_name))
         .arg("--force-window=yes")
         .arg("--keep-open=yes")
         .arg("--idle=no")
         .arg("--no-terminal")
         .arg("--osc=no")
-        .arg("--no-border")
+        .arg("--autofit=960x540")
+        .arg("--title=HAnime Manager Player")
         .arg("--vo=gpu-next")
         .arg("--gpu-api=d3d11")
         .arg(&video_path)
@@ -2509,9 +2454,6 @@ fn start_embedded_mpv(
     {
         Ok(child) => child,
         Err(err) => {
-            unsafe {
-                DestroyWindow(host_hwnd);
-            }
             return Err(format!("启动 mpv 失败: {}", err));
         }
     };
@@ -2519,20 +2461,17 @@ fn start_embedded_mpv(
     if let Err(err) = wait_for_mpv_ipc(&pipe_name, &mut child) {
         let _ = child.kill();
         let _ = child.wait();
-        unsafe {
-            DestroyWindow(host_hwnd);
-        }
         return Err(err);
     }
 
-    state.host_hwnd = host_hwnd as isize;
+    state.host_hwnd = 0;
     state.child = Some(child);
     state.pipe_name = pipe_name;
     state.episode_id = Some(episode_id);
 
     Ok(MpvStatus {
         available: true,
-        message: "mpv 已启动".to_string(),
+        message: "mpv 已在独立窗口启动".to_string(),
         time_seconds: 0.0,
         duration_seconds: 0.0,
     })
@@ -2552,35 +2491,12 @@ fn start_embedded_mpv(
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn set_mpv_bounds(
-    x: i32,
-    y: i32,
-    width: i32,
-    height: i32,
-    player: State<Mutex<MpvPlayerState>>,
+    _x: i32,
+    _y: i32,
+    _width: i32,
+    _height: i32,
+    _player: State<Mutex<MpvPlayerState>>,
 ) -> Result<(), String> {
-    let state = player.lock().map_err(|e| e.to_string())?;
-    if state.host_hwnd == 0 {
-        return Ok(());
-    }
-    unsafe {
-        MoveWindow(
-            state.host_hwnd as HWND,
-            x,
-            y,
-            width.max(1),
-            height.max(1),
-            1,
-        );
-        SetWindowPos(
-            state.host_hwnd as HWND,
-            HWND_TOP,
-            x,
-            y,
-            width.max(1),
-            height.max(1),
-            SWP_SHOWWINDOW | SWP_NOACTIVATE,
-        );
-    }
     Ok(())
 }
 
@@ -2659,13 +2575,7 @@ fn stop_embedded_mpv(player: State<Mutex<MpvPlayerState>>) -> Result<(), String>
         let _ = child.kill();
         let _ = child.wait();
     }
-    #[cfg(target_os = "windows")]
-    if state.host_hwnd != 0 {
-        unsafe {
-            DestroyWindow(state.host_hwnd as HWND);
-        }
-        state.host_hwnd = 0;
-    }
+    state.host_hwnd = 0;
     state.pipe_name.clear();
     state.episode_id = None;
     Ok(())
