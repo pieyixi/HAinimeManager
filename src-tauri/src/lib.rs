@@ -129,6 +129,12 @@ pub struct ArchiveEpisodeCoverSaveInput {
 }
 
 #[derive(Debug, Serialize)]
+pub struct CapturedCover {
+    pub cover_path: String,
+    pub target: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ImageCandidate {
     pub source: String,
     pub url: String,
@@ -2293,6 +2299,93 @@ fn update_episode_cover(
     Ok(cover_path)
 }
 
+fn ffmpeg_path() -> String {
+    std::env::var("FFMPEG_PATH").unwrap_or_else(|_| {
+        let bundled = r"D:\Envirnment\ffmpeg\bin\ffmpeg.exe";
+        if std::path::Path::new(bundled).exists() {
+            bundled.to_string()
+        } else {
+            "ffmpeg".to_string()
+        }
+    })
+}
+
+#[tauri::command]
+fn capture_video_cover(
+    episode_id: i64,
+    time_seconds: f64,
+    target: String,
+    db: State<Database>,
+) -> Result<CapturedCover, String> {
+    if !time_seconds.is_finite() || time_seconds < 0.0 {
+        return Err("截帧时间无效".to_string());
+    }
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let (work_id, episode_number, video_path, folder_path): (i64, i32, String, String) = conn
+        .query_row(
+            "SELECT e.WorkId, e.Number, e.VideoPath, w.FolderPath
+             FROM Episodes e
+             INNER JOIN Works w ON e.WorkId = w.Id
+             WHERE e.Id = ?1",
+            params![episode_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    if !std::path::Path::new(&video_path).is_file() {
+        return Err("视频文件不存在".to_string());
+    }
+
+    let data_dir = std::path::Path::new(&folder_path).join("data");
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+
+    let normalized_target = if target == "work" { "work" } else { "episode" };
+    let out_path = if normalized_target == "work" {
+        data_dir.join("cover.jpg")
+    } else {
+        data_dir.join(format!("cover_ep{}.jpg", episode_number))
+    };
+
+    let status = std::process::Command::new(ffmpeg_path())
+        .arg("-y")
+        .arg("-ss")
+        .arg(format!("{:.3}", time_seconds))
+        .arg("-i")
+        .arg(&video_path)
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-q:v")
+        .arg("2")
+        .arg(&out_path)
+        .status()
+        .map_err(|e| format!("启动 ffmpeg 失败: {}", e))?;
+
+    if !status.success() || !out_path.exists() {
+        return Err("ffmpeg 截帧失败".to_string());
+    }
+
+    let cover_path = out_path.to_string_lossy().to_string();
+    if normalized_target == "work" {
+        conn.execute(
+            "UPDATE Works SET CoverPath=?1, UpdatedAt=datetime('now','localtime') WHERE Id=?2",
+            params![cover_path, work_id],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "UPDATE Episodes SET CoverPath=?1 WHERE Id=?2",
+            params![cover_path, episode_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    Ok(CapturedCover {
+        cover_path,
+        target: normalized_target.to_string(),
+    })
+}
+
 #[tauri::command]
 fn play_video(video_path: String) -> Result<(), String> {
     let player = std::env::var("POTPLAYER_PATH").unwrap_or_else(|_| {
@@ -2563,6 +2656,7 @@ pub fn run() {
             batch_import_folders,
             update_work_cover,
             update_episode_cover,
+            capture_video_cover,
             backup_database,
             restore_database,
             load_cover_cache,

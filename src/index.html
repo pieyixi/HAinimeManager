@@ -96,6 +96,20 @@
   .detail-actions .btn-secondary{width:100%}
   .btn-secondary{height:32px;padding:0 13px;border:1px solid var(--line-strong);border-radius:7px;background:#fff;font-size:13px;color:#374151;cursor:pointer;font-family:inherit}
   .btn-secondary:hover{border-color:#b8c0ca;background:#f9fafb}
+  .player-page{width:100%;padding:20px 32px 32px;display:flex;flex-direction:column;min-height:0}
+  .player-shell{width:min(1180px,100%);margin:0 auto;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;min-height:0;flex:1}
+  .player-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .player-title{font-size:18px;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .player-stage{background:#111827;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:0;border:1px solid #0b1220}
+  .player-stage video{width:100%;height:100%;max-height:calc(100vh - 210px);object-fit:contain;background:#000}
+  .player-controls{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(15,23,42,0.05)}
+  .player-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .player-row + .player-row{margin-top:12px}
+  .player-range{flex:1;min-width:220px}
+  .player-time{font-size:12px;color:var(--muted);min-width:104px;text-align:center}
+  .player-msg{font-size:13px;color:var(--muted);min-height:20px}
+  .player-msg.err{color:var(--danger)}
+  .player-msg.info{color:var(--primary)}
 
   .settings{width:min(980px,calc(100% - 64px));padding:24px 0 36px;margin:0 auto}
   .settings-title{font-size:28px;font-weight:750;color:#111827;margin-bottom:20px;text-align:left;letter-spacing:0}
@@ -180,6 +194,8 @@
     .search-box{grid-column:1/2}
     .detail-layout{grid-template-columns:1fr}
     .detail-left,.detail-cover{width:100%;max-width:320px}
+    .player-page{padding:16px}
+    .player-head{align-items:flex-start;flex-direction:column}
     .settings,.workspace{width:calc(100% - 32px)}
     .settings-grid,.unarchived-toolbar{grid-template-columns:1fr}
     .archive-shell{grid-template-columns:1fr}
@@ -246,6 +262,39 @@
           <div class="detail-episodes">
             <div class="episodes-title">集数列表</div>
             <div class="episode-list" id="episodeList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-player">
+    <div class="player-page">
+      <div class="player-shell">
+        <div class="player-head">
+          <div>
+            <div class="detail-back" onclick="returnFromPlayer()">&#8592; 返回详情</div>
+            <div class="player-title" id="playerTitle">播放器</div>
+          </div>
+          <button class="btn-secondary" onclick="openPlayerExternal()">外部播放器</button>
+        </div>
+        <div class="player-stage">
+          <video id="videoPlayer" controls playsinline preload="metadata"></video>
+        </div>
+        <div class="player-controls">
+          <div class="player-row">
+            <button class="btn-secondary" onclick="togglePlayerPlay()">播放/暂停</button>
+            <button class="btn-secondary" onclick="seekPlayer(-5)">-5s</button>
+            <button class="btn-secondary" onclick="seekPlayer(-1)">-1s</button>
+            <input class="player-range" id="playerSeek" type="range" min="0" max="0" step="0.01" value="0" oninput="seekPlayerTo(this.value)">
+            <button class="btn-secondary" onclick="seekPlayer(1)">+1s</button>
+            <button class="btn-secondary" onclick="seekPlayer(5)">+5s</button>
+            <span class="player-time" id="playerTime">00:00 / 00:00</span>
+          </div>
+          <div class="player-row">
+            <button class="btn-secondary" onclick="captureCurrentFrame('episode')">设为本集封面</button>
+            <button class="btn-secondary" onclick="captureCurrentFrame('work')">设为主封面</button>
+            <span class="player-msg" id="playerMsg"></span>
           </div>
         </div>
       </div>
@@ -414,6 +463,10 @@ var state = {
   scanFolders: [],
   contextWorkId: null,
   confirmResolver: null,
+  player: {
+    episode: null,
+    wasPlaying: false,
+  },
   archive: {
     draft: null,
     coverData: null,
@@ -471,6 +524,14 @@ function showHome() {
 function coverUrl(path) {
   if (!path) return '';
   return state.coverCache[path] || '';
+}
+
+function fileUrl(path) {
+  if (!path) return '';
+  if (window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.convertFileSrc) {
+    return window.__TAURI__.core.convertFileSrc(path);
+  }
+  return 'file:///' + String(path).replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:');
 }
 
 async function loadCovers(paths) {
@@ -795,10 +856,10 @@ async function showDetail(id) {
     document.getElementById('episodeList').innerHTML = episodes.map(function(e){
       var eCover = coverUrl(e.cover_path);
       var eImgHtml = eCover ? '<img src="' + eCover + '" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0" onerror="this.style.display=\'none\'">' : '';
-      return '<div class="episode-item" onclick="playEpisode(\'' + escAttr(e.video_path) + '\')"><div class="episode-cover">' +
+      return '<div class="episode-item" onclick="openPlayer(' + e.id + ')"><div class="episode-cover">' +
         eImgHtml + '&#127916;</div>' +
         '<div class="episode-info"><div class="episode-num">第' + e.number + '集</div><div class="episode-sub">' + escHtml(e.title) + '</div></div>' +
-        '<div class="episode-play">&#9654; 播放</div></div>';
+        '<div class="episode-play">&#9654; 播放 / 截封面</div></div>';
     }).join('');
 
     document.getElementById('btnOpenFolder').onclick = function(){ openWorkFolder(w.folder_path); };
@@ -812,8 +873,128 @@ function escAttr(s) {
   return String(s).replace(/&/g,'&amp;').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'&lt;').replace(/"/g,'&quot;');
 }
 
+function formatTime(seconds) {
+  seconds = Math.max(0, Number(seconds) || 0);
+  var h = Math.floor(seconds / 3600);
+  var m = Math.floor((seconds % 3600) / 60);
+  var s = Math.floor(seconds % 60);
+  if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+}
+
+function playerMessage(kind, text) {
+  var msg = document.getElementById('playerMsg');
+  if (!msg) return;
+  msg.className = 'player-msg ' + (kind || '');
+  msg.textContent = text || '';
+}
+
+function currentPlayerEpisode() {
+  if (!state.currentDetail || !state.player.episode) return null;
+  return (state.currentDetail.episodes || []).find(function(e){ return e.id === state.player.episode.id; }) || state.player.episode;
+}
+
+function bindPlayerEvents() {
+  var video = document.getElementById('videoPlayer');
+  if (!video || video.dataset.bound) return;
+  video.dataset.bound = '1';
+  video.addEventListener('loadedmetadata', updatePlayerControls);
+  video.addEventListener('timeupdate', updatePlayerControls);
+  video.addEventListener('durationchange', updatePlayerControls);
+  video.addEventListener('error', function(){
+    playerMessage('err', '内置播放器无法解码此视频，可用外部播放器查看；截封面需要先能定位时间点。');
+  });
+}
+
+function updatePlayerControls() {
+  var video = document.getElementById('videoPlayer');
+  var seek = document.getElementById('playerSeek');
+  var time = document.getElementById('playerTime');
+  if (!video || !seek || !time) return;
+  var duration = Number.isFinite(video.duration) ? video.duration : 0;
+  var current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  seek.max = duration || 0;
+  seek.value = current || 0;
+  time.textContent = formatTime(current) + ' / ' + formatTime(duration);
+}
+
+function openPlayer(episodeId) {
+  var detail = state.currentDetail;
+  if (!detail) return;
+  var ep = (detail.episodes || []).find(function(item){ return item.id === episodeId; });
+  if (!ep) return;
+  state.player.episode = ep;
+  var video = document.getElementById('videoPlayer');
+  document.getElementById('playerTitle').textContent = detail.work.title + ' / 第' + ep.number + '集';
+  playerMessage('', '');
+  bindPlayerEvents();
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  video.src = fileUrl(ep.video_path);
+  video.load();
+  showPage('page-player');
+}
+
+function returnFromPlayer() {
+  var video = document.getElementById('videoPlayer');
+  if (video) video.pause();
+  showPage('page-detail');
+}
+
+function togglePlayerPlay() {
+  var video = document.getElementById('videoPlayer');
+  if (!video) return;
+  if (video.paused) video.play().catch(function(){});
+  else video.pause();
+}
+
+function seekPlayer(delta) {
+  var video = document.getElementById('videoPlayer');
+  if (!video) return;
+  var duration = Number.isFinite(video.duration) ? video.duration : Number.MAX_SAFE_INTEGER;
+  video.currentTime = Math.max(0, Math.min(duration, (video.currentTime || 0) + delta));
+  updatePlayerControls();
+}
+
+function seekPlayerTo(value) {
+  var video = document.getElementById('videoPlayer');
+  if (!video) return;
+  video.currentTime = Math.max(0, Number(value) || 0);
+  updatePlayerControls();
+}
+
 async function playEpisode(videoPath) {
   try { await invoke('play_video', { videoPath: videoPath }); } catch(e) { console.error('play failed:', e); }
+}
+
+async function openPlayerExternal() {
+  var ep = currentPlayerEpisode();
+  if (!ep) return;
+  await playEpisode(ep.video_path);
+}
+
+async function captureCurrentFrame(target) {
+  var ep = currentPlayerEpisode();
+  var video = document.getElementById('videoPlayer');
+  if (!ep || !video) return;
+  var time = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  playerMessage('info', '正在截取 ' + formatTime(time) + '...');
+  try {
+    var result = await invoke('capture_video_cover', { episodeId: ep.id, timeSeconds: time, target: target });
+    delete state.coverCache[result.cover_path];
+    await loadCovers([result.cover_path]);
+    if (target === 'work' && state.currentDetail && state.currentDetail.work) {
+      var work = state.works.find(function(item){ return item.id === state.currentDetail.work.id; });
+      if (work) work.cover_path = result.cover_path;
+    }
+    await showDetail(state.currentDetail.work.id);
+    state.player.episode = (state.currentDetail.episodes || []).find(function(item){ return item.id === ep.id; }) || ep;
+    showPage('page-player');
+    playerMessage('info', target === 'work' ? '已设为主封面' : '已设为本集封面');
+  } catch(e) {
+    playerMessage('err', '截封面失败: ' + (e.message || e));
+  }
 }
 
 async function openWorkFolder(folderPath) {
