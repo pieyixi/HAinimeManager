@@ -239,7 +239,7 @@
           <button class="btn-secondary" onclick="doScan()">扫描</button>
           <button class="btn-secondary" onclick="doSync()">同步</button>
           <button class="btn-secondary" onclick="doDuplicateCheck()">查重</button>
-          <button class="btn-secondary" onclick="openArchiveAssistant()">建档助手</button>
+          <button class="btn-secondary" onclick="openUnarchivedPage()">未建档</button>
         </div>
         <div id="scanMsg"></div>
         <div id="syncMsg"></div>
@@ -256,6 +256,21 @@
           <input class="s-input" type="text" id="dbFilePath" placeholder="备份/恢复文件路径" style="width:100%">
         </div>
         <div id="dbMsg"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-unarchived">
+    <div class="settings">
+      <div class="detail-back" onclick="showPage('page-settings')">&#8592; 返回设置</div>
+      <div class="settings-title">未建档 / 建档不完整</div>
+      <div class="settings-group">
+        <div class="settings-label">只显示有视频但缺少完整 data 信息的文件夹</div>
+        <div class="settings-field">
+          <input class="s-input" type="text" id="unarchivedPath" value="D:\HAnime">
+          <button class="btn-secondary" onclick="loadUnarchivedFolders()">刷新</button>
+        </div>
+        <div id="unarchivedList"></div>
       </div>
     </div>
   </div>
@@ -282,22 +297,12 @@
 
           <div style="height:18px"></div>
           <div class="archive-section-title">主封面</div>
-          <div class="drop-zone" id="archiveCoverDrop">拖入主封面，或从右侧候选选择</div>
-          <div class="candidate-list" id="coverCandidates"></div>
+          <div class="drop-zone" id="archiveCoverDrop">拖入主封面</div>
         </div>
 
         <div class="archive-panel">
-          <div class="archive-section-title">来源</div>
-          <div class="archive-field">
-            <div class="archive-label">Getchu 链接</div>
-            <input class="archive-input" id="archiveGetchuUrl">
-          </div>
-          <div class="archive-field">
-            <div class="archive-label">hanime1 链接</div>
-            <input class="archive-input" id="archiveHanimeUrl">
-          </div>
+          <div class="archive-section-title">操作</div>
           <div class="archive-actions">
-            <button class="btn-secondary" onclick="scrapeArchiveSources()">抓取候选</button>
             <button class="btn-secondary" onclick="saveArchive(false)">保存 meta</button>
             <button class="btn-secondary" onclick="saveArchive(true)">保存并导入</button>
           </div>
@@ -372,9 +377,7 @@ var state = {
   archive: {
     draft: null,
     coverData: null,
-    coverUrl: '',
     episodeCoverData: {},
-    scrapedTags: null,
   },
 };
 
@@ -816,20 +819,53 @@ function showArchiveMsg(kind, text) {
   msg.innerHTML = '<div class="settings-msg ' + kind + '">' + escHtml(text) + '</div>';
 }
 
+async function openUnarchivedPage() {
+  document.getElementById('unarchivedPath').value = document.getElementById('mediaPath').value.trim() || 'D:\\HAnime';
+  showPage('page-unarchived');
+  await loadUnarchivedFolders();
+}
+
+async function loadUnarchivedFolders() {
+  var path = document.getElementById('unarchivedPath').value.trim();
+  var box = document.getElementById('unarchivedList');
+  if (!path) return;
+  box.innerHTML = '<div class="settings-msg info">扫描未建档作品中...</div>';
+  try {
+    var folders = await invoke('list_unarchived_folders', { rootPath: path });
+    if (!folders.length) {
+      box.innerHTML = '<div class="settings-msg info">没有未建档作品</div>';
+      return;
+    }
+    var html = '<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">';
+    folders.forEach(function(item){
+      html += '<div style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;display:flex;align-items:center;gap:10px">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div style="font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(item.title) + '</div>' +
+          '<div style="font-size:12px;color:#6b7280;word-break:break-all;margin-top:3px">' + escHtml(item.folder_path) + '</div>' +
+          '<div style="font-size:12px;color:#6b7280;margin-top:3px">' + item.video_count + ' 个视频' + (item.has_meta_json ? ' / meta 不完整' : ' / 未建档') + '</div>' +
+          '<div style="font-size:12px;color:#c93535;margin-top:3px">' + escHtml((item.missing_reasons || []).slice(0, 6).join('、')) + ((item.missing_reasons || []).length > 6 ? '...' : '') + '</div>' +
+        '</div>' +
+        '<button class="btn-secondary" onclick="openArchiveAssistant(\'' + escAttr(item.folder_path) + '\')">建档</button>' +
+      '</div>';
+    });
+    html += '</div>';
+    box.innerHTML = html;
+  } catch(e) {
+    box.innerHTML = '<div class="settings-msg err">扫描失败: ' + escHtml(e) + '</div>';
+  }
+}
+
 function openArchiveAssistant(dirPath) {
-  state.archive = { draft: null, coverData: null, coverUrl: '', episodeCoverData: {}, scrapedTags: null };
+  state.archive = { draft: null, coverData: null, episodeCoverData: {} };
   document.getElementById('archiveDir').value = dirPath || '';
   document.getElementById('archiveOfficialTitle').value = '';
-  document.getElementById('archiveGetchuUrl').value = '';
-  document.getElementById('archiveHanimeUrl').value = '';
   document.getElementById('archiveTitle').value = '';
   document.getElementById('archiveStudio').value = '';
   document.getElementById('archiveCharacters').value = '';
   document.getElementById('archiveSynopsis').value = '';
   document.getElementById('archiveEpisodes').innerHTML = '';
-  document.getElementById('coverCandidates').innerHTML = '';
   document.getElementById('scrapedTags').innerHTML = '';
-  document.getElementById('archiveCoverDrop').innerHTML = '拖入主封面，或从右侧候选选择';
+  document.getElementById('archiveCoverDrop').innerHTML = '拖入主封面';
   document.getElementById('archiveMsg').innerHTML = '';
   showPage('page-archive');
   setupArchiveDropZones();
@@ -861,7 +897,7 @@ async function loadArchiveDraft() {
 
 function renderCoverDrop(src) {
   var box = document.getElementById('archiveCoverDrop');
-  box.innerHTML = src ? '<img src="' + src + '">' : '拖入主封面，或从右侧候选选择';
+  box.innerHTML = src ? '<img src="' + src + '">' : '拖入主封面';
 }
 
 function renderArchiveEpisodes() {
@@ -902,7 +938,6 @@ function setupArchiveDropZones() {
     main.dataset.bound = '1';
     bindDropZone(main, async function(file){
       state.archive.coverData = await fileToDataUrl(file);
-      state.archive.coverUrl = '';
       renderCoverDrop(state.archive.coverData);
     });
   }
@@ -926,55 +961,6 @@ function bindDropZone(el, onFile) {
     var file = e.dataTransfer.files && e.dataTransfer.files[0];
     if (file) onFile(file);
   });
-}
-
-async function scrapeArchiveSources() {
-  var getchuUrl = document.getElementById('archiveGetchuUrl').value.trim();
-  var hanimeUrl = document.getElementById('archiveHanimeUrl').value.trim();
-  if (!getchuUrl && !hanimeUrl) { showArchiveMsg('err', '请先填写 Getchu 或 hanime1 链接'); return; }
-  showArchiveMsg('info', '抓取候选信息中...');
-  try {
-    var data = await invoke('scrape_archive_sources', { getchuUrl: getchuUrl || null, hanimeUrl: hanimeUrl || null });
-    if (data.title && !document.getElementById('archiveTitle').value.trim()) document.getElementById('archiveTitle').value = data.title;
-    if (data.studio && !document.getElementById('archiveStudio').value.trim()) document.getElementById('archiveStudio').value = data.studio;
-    if (data.synopsis && !document.getElementById('archiveSynopsis').value.trim()) document.getElementById('archiveSynopsis').value = data.synopsis;
-    state.archive.scrapedTags = data.tags || null;
-    renderScrapedTags(data.raw_tags || []);
-    renderCoverCandidates(data.cover_candidates || []);
-    applyScrapedTagsToEpisodes(data.tags);
-    showArchiveMsg('info', '候选信息已抓取，请检查后保存');
-  } catch(e) {
-    showArchiveMsg('err', '抓取失败: ' + e);
-  }
-}
-
-function renderScrapedTags(tags) {
-  var box = document.getElementById('scrapedTags');
-  box.innerHTML = tags.map(function(t){ return '<span class="tag-chip">' + escHtml(t) + '</span>'; }).join('');
-}
-
-function renderCoverCandidates(candidates) {
-  var box = document.getElementById('coverCandidates');
-  box.innerHTML = candidates.slice(0, 8).map(function(c, i){
-    return '<div class="candidate" data-cover-url="' + escAttr(c.url) + '" onclick="selectCoverCandidate(this)">' +
-      '<img src="' + escAttr(c.url) + '" onerror="this.style.display=\'none\'">' +
-      '<div>' + escHtml(c.source) + '</div></div>';
-  }).join('');
-}
-
-function selectCoverCandidate(el) {
-  document.querySelectorAll('.candidate').forEach(function(c){ c.classList.remove('selected'); });
-  el.classList.add('selected');
-  state.archive.coverUrl = el.getAttribute('data-cover-url') || '';
-  state.archive.coverData = null;
-  document.getElementById('archiveCoverDrop').innerHTML = state.archive.coverUrl ? '<img src="' + escAttr(state.archive.coverUrl) + '">' : '拖入主封面，或从右侧候选选择';
-}
-
-function applyScrapedTagsToEpisodes(tags) {
-  if (!tags) return;
-  document.querySelectorAll('[data-ep-field="theme"]').forEach(function(input){ if (!input.value.trim()) input.value = (tags.theme || []).join(', '); });
-  document.querySelectorAll('[data-ep-field="attribute"]').forEach(function(input){ if (!input.value.trim()) input.value = (tags.attribute || []).join(', '); });
-  document.querySelectorAll('[data-ep-field="scene"]').forEach(function(input){ if (!input.value.trim()) input.value = (tags.scene || []).join(', '); });
 }
 
 function splitTags(value) {
@@ -1005,9 +991,6 @@ function collectArchiveInput() {
     characters: characters,
     episode_list: episodes,
     cover_data: state.archive.coverData,
-    cover_url: state.archive.coverUrl || null,
-    getchu_url: document.getElementById('archiveGetchuUrl').value.trim() || null,
-    hanime_url: document.getElementById('archiveHanimeUrl').value.trim() || null,
   };
 }
 
@@ -1052,7 +1035,6 @@ async function doScan() {
       var name = f.split(/[\\/]/).pop();
       html += '<div style="padding:4px 0;display:flex;align-items:center;gap:8px">' +
         '<span style="flex:1">' + escHtml(name) + '</span>' +
-        '<button class="btn-secondary" onclick="openArchiveAssistant(\'' + escAttr(f) + '\')" style="font-size:11px;padding:2px 8px">建档</button>' +
         '<button class="btn-secondary" onclick="doImportOne(\'' + escAttr(f) + '\')" style="font-size:11px;padding:2px 8px">导入</button></div>';
     });
     html += '</div>';

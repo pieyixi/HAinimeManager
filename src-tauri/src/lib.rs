@@ -96,9 +96,6 @@ pub struct ArchiveSaveInput {
     pub characters: std::collections::HashMap<String, String>,
     pub episode_list: Vec<ArchiveEpisodeDraft>,
     pub cover_data: Option<String>,
-    pub cover_url: Option<String>,
-    pub getchu_url: Option<String>,
-    pub hanime_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -143,6 +140,16 @@ pub struct DuplicateItem {
 pub struct DuplicateGroup {
     pub signature: String,
     pub items: Vec<DuplicateItem>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UnarchivedFolder {
+    pub title: String,
+    pub folder_path: String,
+    pub video_count: i32,
+    pub has_data_dir: bool,
+    pub has_meta_json: bool,
+    pub missing_reasons: Vec<String>,
 }
 
 // ─── Test Set Format Import ───────────────────────────────
@@ -319,14 +326,6 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         }
     }
 
-    // Auto-generate cover if no cover file exists
-    let cover_exists = ["jpg","png","jpeg"].iter().any(|ext| {
-        data_dir.join(format!("cover.{}", ext)).exists() || data_dir.join(format!("{}_cover.{}", dir_name, ext)).exists()
-    });
-    if !cover_exists && !videos.is_empty() {
-        auto_generate_cover(conn, work_id, dir_path);
-    }
-
     Ok(work_id)
 }
 
@@ -443,6 +442,109 @@ fn find_existing_cover(data_dir: &std::path::Path, stem: &str) -> Option<String>
     None
 }
 
+fn has_any_image(data_dir: &std::path::Path, stem: &str) -> bool {
+    find_existing_cover(data_dir, stem).is_some()
+}
+
+fn value_non_empty_string(v: Option<&serde_json::Value>) -> bool {
+    v.and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false)
+}
+
+fn value_non_empty_array(v: Option<&serde_json::Value>) -> bool {
+    v.and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
+}
+
+fn archive_missing_reasons(dir_path: &str) -> Vec<String> {
+    let path = std::path::Path::new(dir_path);
+    let data_dir = path.join("data");
+    let meta_path = data_dir.join("meta.json");
+    let mut reasons = Vec::new();
+
+    if !data_dir.exists() {
+        reasons.push("缺少 data 文件夹".to_string());
+    }
+    if !meta_path.exists() {
+        reasons.push("缺少 data/meta.json".to_string());
+        if !has_any_image(&data_dir, "cover") {
+            reasons.push("缺少主封面".to_string());
+        }
+        let (video_count, _) = folder_video_stats(dir_path);
+        for i in 1..=video_count {
+            if !has_any_image(&data_dir, &format!("cover_ep{}", i)) {
+                reasons.push(format!("缺少第{}集封面", i));
+            }
+        }
+        return reasons;
+    }
+
+    let content = match std::fs::read_to_string(&meta_path) {
+        Ok(content) => content,
+        Err(_) => {
+            reasons.push("meta.json 无法读取".to_string());
+            return reasons;
+        }
+    };
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(json) => json,
+        Err(_) => {
+            reasons.push("meta.json 格式错误".to_string());
+            return reasons;
+        }
+    };
+
+    if !value_non_empty_string(json.get("title")) {
+        reasons.push("缺少标题".to_string());
+    }
+    if !value_non_empty_string(json.get("studio")) {
+        reasons.push("缺少制作商".to_string());
+    }
+    if !value_non_empty_string(json.get("synopsis")) {
+        reasons.push("缺少简介".to_string());
+    }
+    let characters_complete = json.get("characters")
+        .and_then(|v| v.as_object())
+        .map(|m| !m.is_empty() && m.values().any(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)))
+        .unwrap_or(false);
+    if !characters_complete {
+        reasons.push("缺少女主/角色".to_string());
+    }
+    if !has_any_image(&data_dir, "cover") {
+        reasons.push("缺少主封面".to_string());
+    }
+
+    let (video_count, _) = folder_video_stats(dir_path);
+    let episodes = json.get("episode_list").and_then(|v| v.as_array());
+    if episodes.map(|e| e.len()).unwrap_or(0) != video_count as usize {
+        reasons.push("集数列表与视频数量不一致".to_string());
+    }
+    for i in 1..=video_count {
+        if !has_any_image(&data_dir, &format!("cover_ep{}", i)) {
+            reasons.push(format!("缺少第{}集封面", i));
+        }
+    }
+    if let Some(episodes) = episodes {
+        for (idx, ep) in episodes.iter().enumerate() {
+            let n = idx + 1;
+            if !value_non_empty_string(ep.get("release_date")) {
+                reasons.push(format!("第{}集缺少发售时间", n));
+            }
+            let tags = ep.get("tags");
+            let has_tags = value_non_empty_array(tags.and_then(|t| t.get("theme")))
+                || value_non_empty_array(tags.and_then(|t| t.get("attribute")))
+                || value_non_empty_array(tags.and_then(|t| t.get("scene")));
+            if !has_tags {
+                reasons.push(format!("第{}集缺少 Tag", n));
+            }
+        }
+    }
+
+    reasons
+}
+
+fn is_archive_complete(dir_path: &str) -> bool {
+    archive_missing_reasons(dir_path).is_empty()
+}
+
 fn image_ext_from_data(data: &[u8]) -> &'static str {
     if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" {
         "jpg"
@@ -548,12 +650,6 @@ fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
 
     if let Some(ref cover_data) = input.cover_data {
         write_image_data(&data_dir, "cover", cover_data)?;
-    } else if let Some(ref cover_url) = input.cover_url {
-        if !cover_url.trim().is_empty() {
-            let data = fetch_binary(cover_url)?;
-            let ext = image_ext_from_data(&data);
-            std::fs::write(data_dir.join(format!("cover.{}", ext)), data).map_err(|e| e.to_string())?;
-        }
     }
 
     let episodes_json: Vec<serde_json::Value> = input.episode_list.iter().map(|ep| {
@@ -575,10 +671,6 @@ fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
         "studio": input.studio,
         "synopsis": input.synopsis,
         "characters": input.characters,
-        "source": {
-            "getchu": input.getchu_url.unwrap_or_default(),
-            "hanime1": input.hanime_url.unwrap_or_default(),
-        },
         "episode_list": episodes_json,
     });
 
@@ -864,6 +956,40 @@ fn detect_duplicates(root_path: String, db: State<Database>) -> Result<Vec<Dupli
     Ok(groups)
 }
 
+#[tauri::command]
+fn list_unarchived_folders(root_path: String) -> Result<Vec<UnarchivedFolder>, String> {
+    let root = std::path::Path::new(&root_path);
+    if !root.exists() {
+        return Err("路径不存在".to_string());
+    }
+    let mut result = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            let folder_path = path.to_string_lossy().to_string();
+            let title = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let (video_count, _) = folder_video_stats(&folder_path);
+            if video_count <= 0 { continue; }
+            let data_dir = path.join("data");
+            let meta_json = data_dir.join("meta.json");
+            let missing_reasons = archive_missing_reasons(&folder_path);
+            if !missing_reasons.is_empty() {
+                result.push(UnarchivedFolder {
+                    title,
+                    folder_path,
+                    video_count,
+                    has_data_dir: data_dir.exists(),
+                    has_meta_json: meta_json.exists(),
+                    missing_reasons,
+                });
+            }
+        }
+    }
+    result.sort_by(|a, b| a.title.cmp(&b.title));
+    Ok(result)
+}
+
 // ─── Database ──────────────────────────────────────────────
 
 pub struct Database {
@@ -1025,6 +1151,7 @@ fn get_works(db: State<Database>) -> Result<Vec<Work>, String> {
         })
     }).map_err(|e| e.to_string())?
     .filter_map(|r| r.ok())
+    .filter(|w| is_archive_complete(&w.folder_path))
     .collect();
 
     Ok(works)
@@ -1062,6 +1189,7 @@ fn search_works(keyword: String, db: State<Database>) -> Result<Vec<Work>, Strin
         })
     }).map_err(|e| e.to_string())?
     .filter_map(|r| r.ok())
+    .filter(|w| is_archive_complete(&w.folder_path))
     .collect();
 
     Ok(works)
@@ -1178,6 +1306,7 @@ fn get_works_sorted(sort_by: String, db: State<Database>) -> Result<Vec<Work>, S
         })
     }).map_err(|e| e.to_string())?
     .filter_map(|r| r.ok())
+    .filter(|w| is_archive_complete(&w.folder_path))
     .collect();
     Ok(works)
 }
@@ -1210,7 +1339,9 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
         tags_map.entry(work_id).or_default().push(Tag { id: tag_id, name, category });
     }
 
-    let result: Vec<WorkWithTags> = works.into_iter().map(|(id,title,year,month,studio,description,cover_path,folder_path,episode_count)| {
+    let result: Vec<WorkWithTags> = works.into_iter()
+        .filter(|(_,_,_,_,_,_,_,folder_path,_)| is_archive_complete(folder_path))
+        .map(|(id,title,year,month,studio,description,cover_path,folder_path,episode_count)| {
         WorkWithTags {
             id, title, year, month, studio, description, cover_path, folder_path, episode_count,
             tags: tags_map.remove(&id).unwrap_or_default(),
@@ -1292,9 +1423,6 @@ fn add_work(title: String, year: i32, month: i32, studio: String,
         }
     }
 
-    // Auto-generate cover from first video
-    auto_generate_cover(&conn, work_id, &folder_path);
-
     // Attach tags
     for name in &tag_names {
         let name = name.trim();
@@ -1342,9 +1470,9 @@ fn scan_folder(root_path: String, db: State<Database>) -> Result<Vec<String>, St
                         }
                     })
                 }).unwrap_or(false);
-            let has_data = dir_path.join("data").exists();
+            let archive_complete = is_archive_complete(&dir_path.to_string_lossy());
 
-            if has_video || has_data {
+            if has_video && archive_complete {
                 // Return FULL PATH, not just name
                 let folder = dir_path.to_string_lossy().to_string();
                 if !existing.iter().any(|p| p == &folder.to_lowercase()) {
@@ -1541,7 +1669,8 @@ fn sync_database(root_path: String, db: State<Database>) -> Result<SyncResult, S
                         f.path().is_file() && f.path().extension().and_then(|e| e.to_str())
                             .map(|s| matches!(s.to_lowercase().as_str(), "mp4"|"mkv"|"avi"|"wmv"|"flv"|"mov"|"webm")).unwrap_or(false)
                     )).unwrap_or(false);
-                    if has {
+                    let archive_complete = is_archive_complete(&entry.path().to_string_lossy());
+                    if has && archive_complete {
                         disk_folders.push(entry.path().to_string_lossy().to_string());
                     }
                 }
@@ -1610,79 +1739,6 @@ fn load_cover_cache(cover_paths: Vec<String>) -> Result<Vec<(String, String)>, S
     Ok(result)
 }
 
-#[tauri::command]
-fn generate_thumbnail(video_path: String, work_id: i64, db: State<Database>) -> Result<String, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-
-    // NEVER overwrite existing user cover
-    let existing: Option<String> = conn.query_row(
-        "SELECT CoverPath FROM Works WHERE Id=?1", params![work_id],
-        |r| r.get(0)
-    ).ok();
-    if let Some(ref cp) = existing {
-        if !cp.is_empty() && !cp.contains("_auto") {
-            return Err("作品已有手动上传的封面，不覆盖".to_string());
-        }
-    }
-
-    let app_data = std::env::var("APPDATA").or_else(|_| std::env::var("LOCALAPPDATA")).unwrap_or_default();
-    let cover_dir = std::path::Path::new(&app_data).join("HAnimeManager").join("cache").join("covers");
-    std::fs::create_dir_all(&cover_dir).map_err(|e| e.to_string())?;
-    let out_path = cover_dir.join(format!("work_{}_auto.jpg", work_id));
-    let out_str = out_path.to_string_lossy().to_string();
-    let ffmpeg = find_ffmpeg();
-    let status = std::process::Command::new(&ffmpeg)
-        .args(["-y", "-i", &video_path, "-ss", "00:00:01", "-vframes", "1", "-vf", "scale=300:-1", &out_str])
-        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
-        .status().unwrap_or_else(|_| std::process::ExitStatus::default());
-    if status.success() && out_path.exists() {
-        conn.execute("UPDATE Works SET CoverPath=?1 WHERE Id=?2", params![out_str, work_id]).map_err(|e| e.to_string())?;
-        Ok(out_str)
-    } else { Err(format!("截图失败")) }
-}
-
-// Add auto-thumbnail to add_work: if no cover, auto-generate
-fn auto_generate_cover(conn: &rusqlite::Connection, work_id: i64, _folder_path: &str) {
-    let existing: Option<String> = conn.query_row(
-        "SELECT CoverPath FROM Works WHERE Id=?1", params![work_id], |r| r.get(0)
-    ).ok().flatten();
-    if existing.is_some() && !existing.as_deref().unwrap_or("").is_empty() { return; }
-
-    // Get first episode's video path
-    let video: Option<String> = conn.query_row(
-        "SELECT VideoPath FROM Episodes WHERE WorkId=?1 ORDER BY Number LIMIT 1",
-        params![work_id], |r| r.get(0)
-    ).ok();
-    if let Some(vp) = video {
-        if std::path::Path::new(&vp).exists() {
-            let app_data = std::env::var("APPDATA").or_else(|_| std::env::var("LOCALAPPDATA")).unwrap_or_default();
-            let cover_dir = std::path::Path::new(&app_data).join("HAnimeManager").join("cache").join("covers");
-            std::fs::create_dir_all(&cover_dir).ok();
-            let out_path = cover_dir.join(format!("work_{}_auto.jpg", work_id));
-            let out_str = out_path.to_string_lossy().to_string();
-            let ffmpeg = find_ffmpeg();
-            if std::process::Command::new(&ffmpeg)
-                .args(["-y", "-i", &vp, "-ss", "00:00:01", "-vframes", "1", "-vf", "scale=300:-1", &out_str])
-                .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
-                .status().map(|s| s.success()).unwrap_or(false)
-            {
-                conn.execute("UPDATE Works SET CoverPath=?1 WHERE Id=?2", params![out_str, work_id]).ok();
-            }
-        }
-    }
-}
-
-fn find_ffmpeg() -> String {
-    let paths = [
-        r"D:\Envirnment\ffmpeg\bin\ffmpeg.exe",
-        r"C:\ffmpeg\bin\ffmpeg.exe",
-        r"ffmpeg.exe",
-    ];
-    paths.iter().find(|p| std::path::Path::new(p).exists())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "ffmpeg".to_string())
-}
-
 // ─── App Entry ────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1716,13 +1772,13 @@ pub fn run() {
             backup_database,
             restore_database,
             load_cover_cache,
-            generate_thumbnail,
             import_work_via_json,
             inspect_archive_folder,
             save_archive_draft,
             save_archive_episode_covers,
             scrape_archive_sources,
             detect_duplicates,
+            list_unarchived_folders,
             get_work_meta,
             update_work_meta,
             write_work_json,
