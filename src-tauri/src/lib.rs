@@ -10,8 +10,8 @@ use std::os::windows::process::CommandExt;
 use windows_sys::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, SW_SHOW, WS_CHILD, WS_CLIPSIBLINGS,
-    WS_VISIBLE,
+    CreateWindowExW, DestroyWindow, MoveWindow, SetWindowPos, ShowWindow, HWND_TOP, SWP_NOACTIVATE,
+    SWP_SHOWWINDOW, SW_SHOW, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
 };
 
 // ─── Data Models ──────────────────────────────────────────
@@ -2386,6 +2386,15 @@ fn create_mpv_host(parent_hwnd: HWND) -> Result<HWND, String> {
     } else {
         unsafe {
             ShowWindow(hwnd, SW_SHOW);
+            SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                0,
+                0,
+                100,
+                100,
+                SWP_SHOWWINDOW | SWP_NOACTIVATE,
+            );
         }
         Ok(hwnd)
     }
@@ -2478,6 +2487,8 @@ fn start_embedded_mpv(
         .arg("--no-terminal")
         .arg("--osc=no")
         .arg("--no-border")
+        .arg("--vo=gpu-next")
+        .arg("--gpu-api=d3d11")
         .arg(&video_path)
         .creation_flags(0x08000000)
         .spawn()
@@ -2528,6 +2539,15 @@ fn set_mpv_bounds(
             width.max(1),
             height.max(1),
             1,
+        );
+        SetWindowPos(
+            state.host_hwnd as HWND,
+            HWND_TOP,
+            x,
+            y,
+            width.max(1),
+            height.max(1),
+            SWP_SHOWWINDOW | SWP_NOACTIVATE,
         );
     }
     Ok(())

@@ -911,11 +911,12 @@ function syncMpvBounds() {
   var stage = document.getElementById('mpvStage');
   if (!stage) return;
   var rect = stage.getBoundingClientRect();
+  var scale = window.devicePixelRatio || 1;
   invoke('set_mpv_bounds', {
-    x: Math.round(rect.left),
-    y: Math.round(rect.top),
-    width: Math.round(rect.width),
-    height: Math.round(rect.height),
+    x: Math.round(rect.left * scale),
+    y: Math.round(rect.top * scale),
+    width: Math.round(rect.width * scale),
+    height: Math.round(rect.height * scale),
   }).catch(function(){});
 }
 
