@@ -2583,6 +2583,10 @@ fn mpv_command(
         "seek_absolute" => {
             serde_json::json!({"command":["seek", value.unwrap_or(0.0), "absolute"]})
         }
+        "set_volume" => {
+            serde_json::json!({"command":["set_property","volume", value.unwrap_or(80.0)]})
+        }
+        "toggle_mute" => serde_json::json!({"command":["cycle","mute"]}),
         _ => return Err("未知 mpv 命令".to_string()),
     };
     mpv_ipc_command(&state.pipe_name, command)?;

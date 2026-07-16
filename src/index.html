@@ -106,6 +106,7 @@
   .player-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .player-row + .player-row{margin-top:12px}
   .player-range{flex:1;min-width:220px}
+  .volume-range{width:120px}
   .player-time{font-size:12px;color:var(--muted);min-width:104px;text-align:center}
   .player-msg{font-size:13px;color:var(--muted);min-height:20px}
   .player-msg.err{color:var(--danger)}
@@ -292,6 +293,8 @@
             <span class="player-time" id="playerTime">00:00 / 00:00</span>
           </div>
           <div class="player-row">
+            <button class="btn-secondary" onclick="toggleMute()">静音</button>
+            <input class="volume-range" id="playerVolume" type="range" min="0" max="100" step="1" value="80" oninput="setPlayerVolume(this.value)">
             <button class="btn-secondary" onclick="captureCurrentFrame('episode')">设为本集封面</button>
             <button class="btn-secondary" onclick="captureCurrentFrame('work')">设为主封面</button>
             <span class="player-msg" id="playerMsg"></span>
@@ -911,12 +914,11 @@ function syncMpvBounds() {
   var stage = document.getElementById('mpvStage');
   if (!stage) return;
   var rect = stage.getBoundingClientRect();
-  var scale = window.devicePixelRatio || 1;
   invoke('set_mpv_bounds', {
-    x: Math.round(rect.left * scale),
-    y: Math.round(rect.top * scale),
-    width: Math.round(rect.width * scale),
-    height: Math.round(rect.height * scale),
+    x: Math.round(rect.left),
+    y: Math.round(rect.top),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
   }).catch(function(){});
 }
 
@@ -953,6 +955,7 @@ async function openPlayer(episodeId) {
     document.getElementById('mpvHint').textContent = '';
     playerMessage('info', 'mpv 已启动');
     syncMpvBounds();
+    await setPlayerVolume(document.getElementById('playerVolume').value);
     await pollMpvStatus();
     state.player.timer = setInterval(function(){
       syncMpvBounds();
@@ -982,6 +985,14 @@ async function seekPlayerTo(value) {
   state.player.currentTime = Math.max(0, Number(value) || 0);
   updatePlayerControls();
   try { await invoke('mpv_command', { action: 'seek_absolute', value: state.player.currentTime }); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
+}
+
+async function setPlayerVolume(value) {
+  try { await invoke('mpv_command', { action: 'set_volume', value: Math.max(0, Math.min(100, Number(value) || 0)) }); } catch(e) { playerMessage('err', String(e)); }
+}
+
+async function toggleMute() {
+  try { await invoke('mpv_command', { action: 'toggle_mute', value: null }); } catch(e) { playerMessage('err', String(e)); }
 }
 
 async function playEpisode(videoPath) {
