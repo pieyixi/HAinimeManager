@@ -280,7 +280,7 @@
           <button class="btn-secondary" onclick="openPlayerExternal()">外部播放器</button>
         </div>
         <div class="player-stage" id="mpvStage">
-          <div class="mpv-host-hint" id="mpvHint">mpv 将在独立窗口播放，下面按钮仍可控制进度和截封面</div>
+          <div class="mpv-host-hint" id="mpvHint">mpv 播放区域</div>
         </div>
         <div class="player-controls">
           <div class="player-row">
@@ -914,9 +914,13 @@ function syncMpvBounds() {
   var stage = document.getElementById('mpvStage');
   if (!stage) return;
   var rect = stage.getBoundingClientRect();
+  var borderX = Math.max(0, ((window.outerWidth || window.innerWidth) - window.innerWidth) / 2);
+  var chromeY = Math.max(0, (window.outerHeight || window.innerHeight) - window.innerHeight - borderX);
+  var screenX = (window.screenX !== undefined ? window.screenX : window.screenLeft || 0);
+  var screenY = (window.screenY !== undefined ? window.screenY : window.screenTop || 0);
   invoke('set_mpv_bounds', {
-    x: Math.round(rect.left),
-    y: Math.round(rect.top),
+    x: Math.round(screenX + borderX + rect.left),
+    y: Math.round(screenY + chromeY + rect.top),
     width: Math.round(rect.width),
     height: Math.round(rect.height),
   }).catch(function(){});
@@ -932,6 +936,12 @@ function stopPlayerTimer() {
 async function pollMpvStatus() {
   try {
     var status = await invoke('mpv_status');
+    if (status && status.available === false) {
+      stopPlayerTimer();
+      document.getElementById('mpvHint').textContent = 'mpv 已关闭';
+      playerMessage('info', '播放器已关闭');
+      return;
+    }
     state.player.currentTime = status.time_seconds || 0;
     state.player.duration = status.duration_seconds || state.player.duration || 0;
     updatePlayerControls();
@@ -945,7 +955,7 @@ async function openPlayer(episodeId) {
   if (!ep) return;
   state.player.episode = ep;
   document.getElementById('playerTitle').textContent = detail.work.title + ' / 第' + ep.number + '集';
-  document.getElementById('mpvHint').textContent = '正在启动 mpv 独立播放窗口...';
+  document.getElementById('mpvHint').textContent = '正在启动 mpv 播放窗口...';
   playerMessage('info', '正在启动 mpv 播放内核...');
   showPage('page-player');
   syncMpvBounds();
@@ -953,7 +963,7 @@ async function openPlayer(episodeId) {
   try {
     await invoke('start_embedded_mpv', { episodeId: ep.id });
     document.getElementById('mpvHint').textContent = '';
-    playerMessage('info', 'mpv 已在独立窗口启动');
+    playerMessage('info', 'mpv 已贴入播放区域');
     syncMpvBounds();
     await setPlayerVolume(document.getElementById('playerVolume').value);
     await pollMpvStatus();

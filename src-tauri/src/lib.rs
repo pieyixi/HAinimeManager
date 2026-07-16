@@ -6,6 +6,14 @@ use tauri::State;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::{HWND, LPARAM};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GetWindowLongPtrW, GetWindowThreadProcessId, IsWindowVisible, SetWindowLongPtrW,
+    SetWindowPos, GWL_STYLE, HWND_TOP, SWP_NOACTIVATE, SWP_SHOWWINDOW, WS_CAPTION, WS_MAXIMIZEBOX,
+    WS_MINIMIZEBOX, WS_SYSMENU, WS_THICKFRAME,
+};
 // ─── Data Models ──────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -2385,6 +2393,81 @@ fn mpv_get_duration(pipe_name: &str) -> Result<f64, String> {
     Ok(response.get("data").and_then(|v| v.as_f64()).unwrap_or(0.0))
 }
 
+fn clear_mpv_state(state: &mut MpvPlayerState) {
+    if let Some(mut child) = state.child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        state.host_hwnd = 0;
+    }
+    state.pipe_name.clear();
+    state.episode_id = None;
+}
+
+fn check_mpv_alive(state: &mut MpvPlayerState) -> Result<bool, String> {
+    if let Some(child) = state.child.as_mut() {
+        if child
+            .try_wait()
+            .map_err(|e| format!("检查 mpv 进程失败: {}", e))?
+            .is_some()
+        {
+            clear_mpv_state(state);
+            return Ok(false);
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+#[cfg(target_os = "windows")]
+struct WindowSearch {
+    pid: u32,
+    hwnd: HWND,
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn enum_windows_for_pid(hwnd: HWND, lparam: LPARAM) -> i32 {
+    let search = &mut *(lparam as *mut WindowSearch);
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, &mut pid);
+    if pid == search.pid && IsWindowVisible(hwnd) != 0 {
+        search.hwnd = hwnd;
+        return 0;
+    }
+    1
+}
+
+#[cfg(target_os = "windows")]
+fn find_window_for_pid(pid: u32) -> Option<HWND> {
+    let mut search = WindowSearch {
+        pid,
+        hwnd: std::ptr::null_mut(),
+    };
+    unsafe {
+        EnumWindows(
+            Some(enum_windows_for_pid),
+            &mut search as *mut WindowSearch as LPARAM,
+        );
+    }
+    if search.hwnd.is_null() {
+        None
+    } else {
+        Some(search.hwnd)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn prepare_mpv_overlay(hwnd: HWND) {
+    unsafe {
+        let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+        let remove =
+            (WS_CAPTION | WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX) as isize;
+        SetWindowLongPtrW(hwnd, GWL_STYLE, style & !remove);
+    }
+}
+
 fn wait_for_mpv_ipc(pipe_name: &str, child: &mut std::process::Child) -> Result<(), String> {
     let started = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(5);
@@ -2435,6 +2518,10 @@ fn start_embedded_mpv(
         let _ = child.kill();
         let _ = child.wait();
     }
+    #[cfg(target_os = "windows")]
+    {
+        state.host_hwnd = 0;
+    }
 
     let pipe_name = format!(r"\\.\pipe\hanime_mpv_{}_{}", std::process::id(), episode_id);
     let mut child = match std::process::Command::new(&mpv)
@@ -2464,7 +2551,29 @@ fn start_embedded_mpv(
         return Err(err);
     }
 
+    #[cfg(target_os = "windows")]
+    let mpv_hwnd = {
+        let pid = child.id();
+        let started = std::time::Instant::now();
+        loop {
+            if let Some(hwnd) = find_window_for_pid(pid) {
+                prepare_mpv_overlay(hwnd);
+                break hwnd;
+            }
+            if started.elapsed() > std::time::Duration::from_secs(3) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("未找到 mpv 播放窗口".to_string());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    };
+
     state.host_hwnd = 0;
+    #[cfg(target_os = "windows")]
+    {
+        state.host_hwnd = mpv_hwnd as isize;
+    }
     state.child = Some(child);
     state.pipe_name = pipe_name;
     state.episode_id = Some(episode_id);
@@ -2491,12 +2600,27 @@ fn start_embedded_mpv(
 #[cfg(target_os = "windows")]
 #[tauri::command]
 fn set_mpv_bounds(
-    _x: i32,
-    _y: i32,
-    _width: i32,
-    _height: i32,
-    _player: State<Mutex<MpvPlayerState>>,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    player: State<Mutex<MpvPlayerState>>,
 ) -> Result<(), String> {
+    let state = player.lock().map_err(|e| e.to_string())?;
+    if state.host_hwnd == 0 {
+        return Ok(());
+    }
+    unsafe {
+        SetWindowPos(
+            state.host_hwnd as HWND,
+            HWND_TOP,
+            x,
+            y,
+            width.max(1),
+            height.max(1),
+            SWP_SHOWWINDOW | SWP_NOACTIVATE,
+        );
+    }
     Ok(())
 }
 
@@ -2518,9 +2642,14 @@ fn mpv_command(
     value: Option<f64>,
     player: State<Mutex<MpvPlayerState>>,
 ) -> Result<MpvStatus, String> {
-    let state = player.lock().map_err(|e| e.to_string())?;
-    if state.pipe_name.is_empty() {
-        return Err("mpv 尚未启动".to_string());
+    let mut state = player.lock().map_err(|e| e.to_string())?;
+    if state.pipe_name.is_empty() || !check_mpv_alive(&mut state)? {
+        return Ok(MpvStatus {
+            available: false,
+            message: "mpv 已关闭".to_string(),
+            time_seconds: 0.0,
+            duration_seconds: 0.0,
+        });
     }
     let command = match action.as_str() {
         "toggle_pause" => serde_json::json!({"command":["cycle","pause"]}),
@@ -2536,7 +2665,15 @@ fn mpv_command(
         "toggle_mute" => serde_json::json!({"command":["cycle","mute"]}),
         _ => return Err("未知 mpv 命令".to_string()),
     };
-    mpv_ipc_command(&state.pipe_name, command)?;
+    if let Err(err) = mpv_ipc_command(&state.pipe_name, command) {
+        clear_mpv_state(&mut state);
+        return Ok(MpvStatus {
+            available: false,
+            message: err,
+            time_seconds: 0.0,
+            duration_seconds: 0.0,
+        });
+    }
     let time_seconds = mpv_get_time(&state.pipe_name).unwrap_or(0.0);
     Ok(MpvStatus {
         available: true,
@@ -2548,21 +2685,32 @@ fn mpv_command(
 
 #[tauri::command]
 fn mpv_status(player: State<Mutex<MpvPlayerState>>) -> Result<MpvStatus, String> {
-    let state = player.lock().map_err(|e| e.to_string())?;
-    if state.pipe_name.is_empty() {
+    let mut state = player.lock().map_err(|e| e.to_string())?;
+    if state.pipe_name.is_empty() || !check_mpv_alive(&mut state)? {
         return Ok(MpvStatus {
             available: false,
-            message: "mpv 尚未启动".to_string(),
+            message: "mpv 已关闭".to_string(),
             time_seconds: 0.0,
             duration_seconds: 0.0,
         });
     }
-    Ok(MpvStatus {
-        available: true,
-        message: "ok".to_string(),
-        time_seconds: mpv_get_time(&state.pipe_name).unwrap_or(0.0),
-        duration_seconds: mpv_get_duration(&state.pipe_name).unwrap_or(0.0),
-    })
+    match mpv_get_time(&state.pipe_name) {
+        Ok(time_seconds) => Ok(MpvStatus {
+            available: true,
+            message: "ok".to_string(),
+            time_seconds,
+            duration_seconds: mpv_get_duration(&state.pipe_name).unwrap_or(0.0),
+        }),
+        Err(err) => {
+            clear_mpv_state(&mut state);
+            Ok(MpvStatus {
+                available: false,
+                message: err,
+                time_seconds: 0.0,
+                duration_seconds: 0.0,
+            })
+        }
+    }
 }
 
 #[tauri::command]
@@ -2571,13 +2719,7 @@ fn stop_embedded_mpv(player: State<Mutex<MpvPlayerState>>) -> Result<(), String>
     if !state.pipe_name.is_empty() {
         let _ = mpv_ipc_command(&state.pipe_name, serde_json::json!({"command":["quit"]}));
     }
-    if let Some(mut child) = state.child.take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    state.host_hwnd = 0;
-    state.pipe_name.clear();
-    state.episode_id = None;
+    clear_mpv_state(&mut state);
     Ok(())
 }
 
