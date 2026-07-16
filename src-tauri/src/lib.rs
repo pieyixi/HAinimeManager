@@ -98,6 +98,24 @@ pub struct ArchiveSaveInput {
     pub cover_data: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct ArchiveEpisodeMetaOutput {
+    id: i32,
+    subtitle: String,
+    release_date: String,
+    tags: ArchiveEpisodeTags,
+}
+
+#[derive(Debug, Serialize)]
+struct ArchiveMetaOutput {
+    title: String,
+    episodes: usize,
+    characters: std::collections::HashMap<String, String>,
+    studio: String,
+    synopsis: String,
+    episode_list: Vec<ArchiveEpisodeMetaOutput>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct EpisodeCoverInput {
     pub id: i32,
@@ -813,15 +831,9 @@ fn make_archive_draft(
         .enumerate()
         .map(|(i, video)| {
             let id = (i + 1) as i32;
-            let subtitle = video
-                .file_stem()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
             ArchiveEpisodeDraft {
                 id,
-                subtitle,
+                subtitle: String::new(),
                 release_date: String::new(),
                 video_path: video.to_string_lossy().to_string(),
                 cover_path: find_existing_cover(&data_dir, &format!("cover_ep{}", id)),
@@ -930,31 +942,25 @@ fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
         write_image_data(&data_dir, "cover", cover_data)?;
     }
 
-    let episodes_json: Vec<serde_json::Value> = input
+    let episode_list: Vec<ArchiveEpisodeMetaOutput> = input
         .episode_list
         .iter()
-        .map(|ep| {
-            serde_json::json!({
-                "id": ep.id,
-                "subtitle": ep.subtitle,
-                "release_date": ep.release_date,
-                "tags": {
-                    "theme": ep.tags.theme,
-                    "attribute": ep.tags.attribute,
-                    "scene": ep.tags.scene,
-                }
-            })
+        .map(|ep| ArchiveEpisodeMetaOutput {
+            id: ep.id,
+            subtitle: ep.subtitle.clone(),
+            release_date: ep.release_date.clone(),
+            tags: ep.tags.clone(),
         })
         .collect();
 
-    let json = serde_json::json!({
-        "title": input.title,
-        "episodes": input.episode_list.len(),
-        "studio": input.studio,
-        "synopsis": input.synopsis,
-        "characters": input.characters,
-        "episode_list": episodes_json,
-    });
+    let json = ArchiveMetaOutput {
+        title: input.title,
+        episodes: episode_list.len(),
+        characters: input.characters,
+        studio: input.studio,
+        synopsis: input.synopsis,
+        episode_list,
+    };
 
     let out_path = data_dir.join("meta.json");
     let json_str = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
@@ -1046,8 +1052,7 @@ fn save_archive_json(dir_path: String, json_text: String) -> Result<String, Stri
     let data_dir = path.join("data");
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
     let out_path = data_dir.join("meta.json");
-    let json_str = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
-    std::fs::write(&out_path, format!("{}\n", json_str)).map_err(|e| e.to_string())?;
+    std::fs::write(&out_path, format!("{}\n", json_text.trim())).map_err(|e| e.to_string())?;
     Ok(out_path.to_string_lossy().to_string())
 }
 

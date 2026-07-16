@@ -982,7 +982,7 @@ function renderArchiveEpisodes() {
     return '<div class="episode-editor" data-ep="' + ep.id + '">' +
       '<div class="drop-zone small" data-episode-drop="' + ep.id + '">' + preview + '</div>' +
       '<div class="episode-editor-main">' +
-        '<div><div class="archive-label">第' + ep.id + '集标题</div><input class="archive-input" data-ep-field="subtitle" data-index="' + index + '" value="' + escHtml(ep.subtitle || '') + '"></div>' +
+        '<div><div class="archive-label">第' + ep.id + '集官方副标题（可空）</div><input class="archive-input" data-ep-field="subtitle" data-index="' + index + '" value="' + escHtml(ep.subtitle || '') + '"></div>' +
         '<div><div class="archive-label">发售时间</div><input class="archive-input" data-ep-field="release_date" data-index="' + index + '" value="' + escHtml(ep.release_date || '') + '" placeholder="YYYY-MM"></div>' +
         '<div class="episode-tags">' +
           '<div><div class="archive-label">剧情 Tag</div><input class="archive-input" data-ep-field="theme" data-index="' + index + '" value="' + escHtml((ep.tags.theme || []).join(', ')) + '"></div>' +
