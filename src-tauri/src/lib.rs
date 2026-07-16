@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 use tauri::State;
@@ -177,13 +177,21 @@ struct WorkMeta {
 /// Also supports old format: dir/data/作品名.json, dir/data/作品名_cover.jpg
 fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
     let path = std::path::Path::new(dir_path);
-    if !path.is_dir() { return Err("不是目录".to_string()); }
-    let existing_id = conn.query_row(
-        "SELECT Id FROM Works WHERE lower(FolderPath) = lower(?1) LIMIT 1",
-        params![dir_path],
-        |r| r.get::<_, i64>(0),
-    ).ok();
-    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    if !path.is_dir() {
+        return Err("不是目录".to_string());
+    }
+    let existing_id = conn
+        .query_row(
+            "SELECT Id FROM Works WHERE lower(FolderPath) = lower(?1) LIMIT 1",
+            params![dir_path],
+            |r| r.get::<_, i64>(0),
+        )
+        .ok();
+    let dir_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
     let data_dir = path.join("data");
 
     // Find JSON: data/meta.json, data/作品名.json, 作品名.json
@@ -196,35 +204,62 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         candidates.iter().find(|p| p.exists()).cloned()
     };
 
-    let (title, studio, synopsis, tag_map, episode_list, characters, release) = if let Some(jp) = json_path {
-        let content = std::fs::read_to_string(&jp).map_err(|e| format!("读JSON失败: {}", e))?;
-        let m: WorkMeta = serde_json::from_str(&content).map_err(|e| format!("解析JSON失败: {}", e))?;
-        (m.title, m.studio.unwrap_or_default(), m.synopsis.unwrap_or_default(),
-         m.tag.unwrap_or_default(), m.episode_list.unwrap_or_default(), m.characters, m.release)
-    } else {
-        (dir_name.clone(), String::new(), String::new(), std::collections::HashMap::new(), Vec::new(), None, None)
-    };
+    let (title, studio, synopsis, tag_map, episode_list, characters, release) =
+        if let Some(jp) = json_path {
+            let content = std::fs::read_to_string(&jp).map_err(|e| format!("读JSON失败: {}", e))?;
+            let m: WorkMeta =
+                serde_json::from_str(&content).map_err(|e| format!("解析JSON失败: {}", e))?;
+            (
+                m.title,
+                m.studio.unwrap_or_default(),
+                m.synopsis.unwrap_or_default(),
+                m.tag.unwrap_or_default(),
+                m.episode_list.unwrap_or_default(),
+                m.characters,
+                m.release,
+            )
+        } else {
+            (
+                dir_name.clone(),
+                String::new(),
+                String::new(),
+                std::collections::HashMap::new(),
+                Vec::new(),
+                None,
+                None,
+            )
+        };
 
     // Determine release date from episode_list or top-level release
     let (year, month) = if !episode_list.is_empty() {
         if let Some(first) = episode_list.first() {
             if let Some(ref rd) = first.release_date {
                 let parts: Vec<&str> = rd.splitn(2, '-').collect();
-                (parts.first().and_then(|s| s.parse().ok()).unwrap_or(2024),
-                 parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1))
-            } else { (2024, 1) }
-        } else { (2024, 1) }
+                (
+                    parts.first().and_then(|s| s.parse().ok()).unwrap_or(2024),
+                    parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1),
+                )
+            } else {
+                (2024, 1)
+            }
+        } else {
+            (2024, 1)
+        }
     } else if let Some(ref release) = release {
         parse_year_month(release).unwrap_or((2024, 1))
-    } else { (2024, 1) };
+    } else {
+        (2024, 1)
+    };
 
     let work_id: i64 = if let Some(existing_id) = existing_id {
         conn.execute(
             "UPDATE Works SET Title=?1,Year=?2,Month=?3,Studio=?4,Description=?5,FolderPath=?6,CoverPath=NULL,UpdatedAt=datetime('now','localtime') WHERE Id=?7",
             params![title, year, month, studio, synopsis, dir_path, existing_id],
         ).map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM WorkTags WHERE WorkId=?1", params![existing_id]).map_err(|e| e.to_string())?;
-        conn.execute("DELETE FROM Episodes WHERE WorkId=?1", params![existing_id]).map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM WorkTags WHERE WorkId=?1", params![existing_id])
+            .map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM Episodes WHERE WorkId=?1", params![existing_id])
+            .map_err(|e| e.to_string())?;
         existing_id
     } else {
         conn.execute("INSERT INTO Works (Title,Year,Month,Studio,Description,FolderPath) VALUES (?1,?2,?3,?4,?5,?6)",
@@ -238,8 +273,15 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         for entry in entries.flatten() {
             let p = entry.path();
             if p.is_file() {
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                if matches!(ext.as_str(), "mp4"|"mkv"|"avi"|"wmv"|"flv"|"mov"|"webm") {
+                let ext = p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if matches!(
+                    ext.as_str(),
+                    "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"
+                ) {
                     videos.push(p);
                 }
             }
@@ -250,10 +292,20 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
     for (i, vpath) in videos.iter().enumerate() {
         let num = (i + 1) as i32;
         // Get subtitle from episode_list if available
-        let subtitle = episode_list.get(i).and_then(|e| e.subtitle.clone()).unwrap_or_default();
-        let ep_title = if subtitle.is_empty() { format!("第{}集", num) } else { subtitle };
-        conn.execute("INSERT INTO Episodes (WorkId,Number,Title,VideoPath) VALUES (?1,?2,?3,?4)",
-            params![work_id, num, ep_title, vpath.to_string_lossy().to_string()]).map_err(|e| e.to_string())?;
+        let subtitle = episode_list
+            .get(i)
+            .and_then(|e| e.subtitle.clone())
+            .unwrap_or_default();
+        let ep_title = if subtitle.is_empty() {
+            format!("第{}集", num)
+        } else {
+            subtitle
+        };
+        conn.execute(
+            "INSERT INTO Episodes (WorkId,Number,Title,VideoPath) VALUES (?1,?2,?3,?4)",
+            params![work_id, num, ep_title, vpath.to_string_lossy().to_string()],
+        )
+        .map_err(|e| e.to_string())?;
         let ep_id: i64 = conn.last_insert_rowid();
 
         // Episode cover: data/cover_epN.png or data/作品名_cover_epN.png
@@ -264,8 +316,11 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
             ];
             for ec in &candidates {
                 if ec.exists() {
-                    conn.execute("UPDATE Episodes SET CoverPath=?1 WHERE Id=?2",
-                        params![ec.to_string_lossy().to_string(), ep_id]).ok();
+                    conn.execute(
+                        "UPDATE Episodes SET CoverPath=?1 WHERE Id=?2",
+                        params![ec.to_string_lossy().to_string(), ep_id],
+                    )
+                    .ok();
                     break;
                 }
             }
@@ -274,15 +329,25 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         // Episode-level tags (theme->剧情, attribute->属性, scene->场景)
         if let Some(ep_meta) = episode_list.get(i) {
             if let Some(ref ep_tags) = ep_meta.tags {
-                let ep_cat_map = [("theme","剧情"),("attribute","属性"),("scene","场景")];
+                let ep_cat_map = [("theme", "剧情"), ("attribute", "属性"), ("scene", "场景")];
                 for (key, category) in &ep_cat_map {
                     if let Some(tags) = ep_tags.get(*key) {
                         for tn in tags {
                             let n = tn.trim();
-                            if n.is_empty() { continue; }
+                            if n.is_empty() {
+                                continue;
+                            }
                             // Episode tags are stored as work tags (simplified)
-                            conn.execute("INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)", params![n, category]).ok();
-                            if let Ok(tid) = conn.query_row("SELECT Id FROM Tags WHERE Name=?1", params![n], |r| r.get::<_,i64>(0)) {
+                            conn.execute(
+                                "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)",
+                                params![n, category],
+                            )
+                            .ok();
+                            if let Ok(tid) = conn.query_row(
+                                "SELECT Id FROM Tags WHERE Name=?1",
+                                params![n],
+                                |r| r.get::<_, i64>(0),
+                            ) {
                                 conn.execute("INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)", params![work_id, tid]).ok();
                             }
                         }
@@ -300,23 +365,45 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         ];
         for cp in &candidates {
             if cp.exists() {
-                conn.execute("UPDATE Works SET CoverPath=?1 WHERE Id=?2",
-                    params![cp.to_string_lossy().to_string(), work_id]).ok();
+                conn.execute(
+                    "UPDATE Works SET CoverPath=?1 WHERE Id=?2",
+                    params![cp.to_string_lossy().to_string(), work_id],
+                )
+                .ok();
                 break;
             }
         }
     }
 
     // Work-level tags (thm->剧情, atb->属性, scn->场景, std->制作)
-    let cat_map = [("thm","剧情"),("atb","属性"),("scn","场景"),("std","制作")];
+    let cat_map = [
+        ("thm", "剧情"),
+        ("atb", "属性"),
+        ("scn", "场景"),
+        ("std", "制作"),
+    ];
     for (key, category) in &cat_map {
         if let Some(tags) = tag_map.get(*key) {
             for tn in tags {
                 let n = tn.trim();
-                if n.is_empty() { continue; }
-                conn.execute("INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)", params![n, category]).ok();
-                if let Ok(tid) = conn.query_row("SELECT Id FROM Tags WHERE Name=?1", params![n], |r| r.get::<_,i64>(0)) {
-                    conn.execute("INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)", params![work_id, tid]).ok();
+                if n.is_empty() {
+                    continue;
+                }
+                conn.execute(
+                    "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)",
+                    params![n, category],
+                )
+                .ok();
+                if let Ok(tid) =
+                    conn.query_row("SELECT Id FROM Tags WHERE Name=?1", params![n], |r| {
+                        r.get::<_, i64>(0)
+                    })
+                {
+                    conn.execute(
+                        "INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
+                        params![work_id, tid],
+                    )
+                    .ok();
                 }
             }
         }
@@ -326,10 +413,22 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
     if let Some(chars) = characters {
         for (_, name) in chars {
             let n = name.trim();
-            if n.is_empty() { continue; }
-            conn.execute("INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, '人物')", params![n]).ok();
-            if let Ok(tid) = conn.query_row("SELECT Id FROM Tags WHERE Name=?1", params![n], |r| r.get::<_,i64>(0)) {
-                conn.execute("INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)", params![work_id, tid]).ok();
+            if n.is_empty() {
+                continue;
+            }
+            conn.execute(
+                "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, '人物')",
+                params![n],
+            )
+            .ok();
+            if let Ok(tid) = conn.query_row("SELECT Id FROM Tags WHERE Name=?1", params![n], |r| {
+                r.get::<_, i64>(0)
+            }) {
+                conn.execute(
+                    "INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
+                    params![work_id, tid],
+                )
+                .ok();
             }
         }
     }
@@ -357,35 +456,83 @@ struct MetaTag {
 #[tauri::command]
 fn get_work_meta(work_id: i64, db: State<Database>) -> Result<MetaOutput, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let w = conn.query_row(
-        "SELECT Title,Year,Month,Studio,Description,CoverPath FROM Works WHERE Id=?1",
-        params![work_id],
-        |r| Ok((r.get::<_,String>(0)?, r.get::<_,i32>(1)?, r.get::<_,i32>(2)?, r.get::<_,String>(3)?, r.get::<_,String>(4)?, r.get::<_,Option<String>>(5)?))
-    ).map_err(|e| e.to_string())?;
+    let w = conn
+        .query_row(
+            "SELECT Title,Year,Month,Studio,Description,CoverPath FROM Works WHERE Id=?1",
+            params![work_id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i32>(1)?,
+                    r.get::<_, i32>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
     let mut stmt = conn.prepare("SELECT t.Name,t.Category FROM Tags t INNER JOIN WorkTags wt ON t.Id=wt.TagId WHERE wt.WorkId=?1").map_err(|e| e.to_string())?;
-    let tags: Vec<MetaTag> = stmt.query_map(params![work_id], |r| Ok(MetaTag{name:r.get(0)?,category:r.get(1)?}))
-        .map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+    let tags: Vec<MetaTag> = stmt
+        .query_map(params![work_id], |r| {
+            Ok(MetaTag {
+                name: r.get(0)?,
+                category: r.get(1)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
-    Ok(MetaOutput{title:w.0, year:w.1, month:w.2, studio:w.3, synopsis:w.4, cover_path:w.5, tags})
+    Ok(MetaOutput {
+        title: w.0,
+        year: w.1,
+        month: w.2,
+        studio: w.3,
+        synopsis: w.4,
+        cover_path: w.5,
+        tags,
+    })
 }
 
 #[tauri::command]
-fn update_work_meta(work_id: i64, year: i32, month: i32, studio: String, synopsis: String, db: State<Database>) -> Result<(), String> {
+fn update_work_meta(
+    work_id: i64,
+    year: i32,
+    month: i32,
+    studio: String,
+    synopsis: String,
+    db: State<Database>,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("UPDATE Works SET Year=?1,Month=?2,Studio=?3,Description=?4 WHERE Id=?5",
-        params![year, month, studio, synopsis, work_id]).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE Works SET Year=?1,Month=?2,Studio=?3,Description=?4 WHERE Id=?5",
+        params![year, month, studio, synopsis, work_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 fn write_work_json(work_id: i64, db: State<Database>) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (title, year, month, studio, synopsis, folder): (String,i32,i32,String,String,String) = conn.query_row(
-        "SELECT Title,Year,Month,Studio,Description,FolderPath FROM Works WHERE Id=?1",
-        params![work_id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get::<_,String>(4)?, r.get(5)?))
-    ).map_err(|e| e.to_string())?;
+    let (title, year, month, studio, synopsis, folder): (String, i32, i32, String, String, String) =
+        conn.query_row(
+            "SELECT Title,Year,Month,Studio,Description,FolderPath FROM Works WHERE Id=?1",
+            params![work_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get(5)?,
+                ))
+            },
+        )
+        .map_err(|e| e.to_string())?;
 
     let data_dir = std::path::Path::new(&folder).join("data");
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
@@ -393,17 +540,37 @@ fn write_work_json(work_id: i64, db: State<Database>) -> Result<String, String> 
     // Get tags (if any)
     let mut stmt = conn.prepare("SELECT t.Name,t.Category FROM Tags t INNER JOIN WorkTags wt ON t.Id=wt.TagId WHERE wt.WorkId=?1")
         .map_err(|e| e.to_string())?;
-    let mut tag_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-    let cat_rev = [("剧情","thm"), ("属性","atb"), ("场景","scn"), ("制作","std"), ("人物","character")];
-    for row in stmt.query_map(params![work_id], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?))).map_err(|e| e.to_string())?.flatten() {
-        let key = cat_rev.iter().find(|(c,_)| *c == row.1).map(|(_,k)| k.to_string()).unwrap_or_else(|| row.1.clone());
+    let mut tag_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    let cat_rev = [
+        ("剧情", "thm"),
+        ("属性", "atb"),
+        ("场景", "scn"),
+        ("制作", "std"),
+        ("人物", "character"),
+    ];
+    for row in stmt
+        .query_map(params![work_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
+        let key = cat_rev
+            .iter()
+            .find(|(c, _)| *c == row.1)
+            .map(|(_, k)| k.to_string())
+            .unwrap_or_else(|| row.1.clone());
         tag_map.entry(key).or_default().push(row.0);
     }
 
-    let mut ep_stmt = conn.prepare("SELECT Number, Title FROM Episodes WHERE WorkId=?1 ORDER BY Number")
+    let mut ep_stmt = conn
+        .prepare("SELECT Number, Title FROM Episodes WHERE WorkId=?1 ORDER BY Number")
         .map_err(|e| e.to_string())?;
     let episode_list: Vec<serde_json::Value> = ep_stmt
-        .query_map(params![work_id], |r| Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?)))
+        .query_map(params![work_id], |r| {
+            Ok((r.get::<_, i32>(0)?, r.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .map(|(number, title)| {
@@ -436,7 +603,12 @@ fn write_work_json(work_id: i64, db: State<Database>) -> Result<String, String> 
 fn is_video_file(path: &std::path::Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
-        .map(|s| matches!(s.to_lowercase().as_str(), "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"))
+        .map(|s| {
+            matches!(
+                s.to_lowercase().as_str(),
+                "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -455,11 +627,28 @@ fn has_any_image(data_dir: &std::path::Path, stem: &str) -> bool {
 }
 
 fn value_non_empty_string(v: Option<&serde_json::Value>) -> bool {
-    v.and_then(|v| v.as_str()).map(|s| !s.trim().is_empty()).unwrap_or(false)
+    v.and_then(|v| v.as_str())
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
 }
 
 fn value_non_empty_array(v: Option<&serde_json::Value>) -> bool {
-    v.and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
+    v.and_then(|v| v.as_array())
+        .map(|a| !a.is_empty())
+        .unwrap_or(false)
+}
+
+fn value_string_vec(v: Option<&serde_json::Value>) -> Vec<String> {
+    v.and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn archive_missing_reasons(dir_path: &str) -> Vec<String> {
@@ -509,9 +698,14 @@ fn archive_missing_reasons(dir_path: &str) -> Vec<String> {
     if !value_non_empty_string(json.get("synopsis")) {
         reasons.push("缺少简介".to_string());
     }
-    let characters_complete = json.get("characters")
+    let characters_complete = json
+        .get("characters")
         .and_then(|v| v.as_object())
-        .map(|m| !m.is_empty() && m.values().any(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false)))
+        .map(|m| {
+            !m.is_empty()
+                && m.values()
+                    .any(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false))
+        })
         .unwrap_or(false);
     if !characters_complete {
         reasons.push("缺少女主/角色".to_string());
@@ -575,7 +769,11 @@ fn decode_data_url(input: &str) -> Vec<u8> {
     base64_decode(data)
 }
 
-fn write_image_data(data_dir: &std::path::Path, stem: &str, image_data: &str) -> Result<String, String> {
+fn write_image_data(
+    data_dir: &std::path::Path,
+    stem: &str,
+    image_data: &str,
+) -> Result<String, String> {
     let data = decode_data_url(image_data);
     if data.is_empty() {
         return Err("图片数据为空或无法解码".to_string());
@@ -587,12 +785,19 @@ fn write_image_data(data_dir: &std::path::Path, stem: &str, image_data: &str) ->
     Ok(out_path.to_string_lossy().to_string())
 }
 
-fn make_archive_draft(dir_path: &str, title_override: Option<String>) -> Result<ArchiveDraft, String> {
+fn make_archive_draft(
+    dir_path: &str,
+    title_override: Option<String>,
+) -> Result<ArchiveDraft, String> {
     let path = std::path::Path::new(dir_path);
     if !path.is_dir() {
         return Err("不是目录".to_string());
     }
-    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let dir_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
     let data_dir = path.join("data");
 
     let mut videos: Vec<_> = std::fs::read_dir(path)
@@ -603,28 +808,89 @@ fn make_archive_draft(dir_path: &str, title_override: Option<String>) -> Result<
         .collect();
     videos.sort();
 
-    let episode_list = videos.iter().enumerate().map(|(i, video)| {
-        let id = (i + 1) as i32;
-        let subtitle = video.file_stem().and_then(|n| n.to_str()).unwrap_or("")
-            .trim()
-            .to_string();
-        ArchiveEpisodeDraft {
-            id,
-            subtitle,
-            release_date: String::new(),
-            video_path: video.to_string_lossy().to_string(),
-            cover_path: find_existing_cover(&data_dir, &format!("cover_ep{}", id)),
-            tags: ArchiveEpisodeTags::default(),
+    let mut episode_list = videos
+        .iter()
+        .enumerate()
+        .map(|(i, video)| {
+            let id = (i + 1) as i32;
+            let subtitle = video
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            ArchiveEpisodeDraft {
+                id,
+                subtitle,
+                release_date: String::new(),
+                video_path: video.to_string_lossy().to_string(),
+                cover_path: find_existing_cover(&data_dir, &format!("cover_ep{}", id)),
+                tags: ArchiveEpisodeTags::default(),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut title = title_override
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| dir_name.clone());
+    let mut studio = String::new();
+    let mut synopsis = String::new();
+    let mut characters = std::collections::HashMap::new();
+
+    let meta_path = data_dir.join("meta.json");
+    if let Ok(content) = std::fs::read_to_string(&meta_path) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            if title == dir_name {
+                if let Some(value) = json
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
+                    title = value.to_string();
+                }
+            }
+            if let Some(value) = json.get("studio").and_then(|v| v.as_str()) {
+                studio = value.to_string();
+            }
+            if let Some(value) = json.get("synopsis").and_then(|v| v.as_str()) {
+                synopsis = value.to_string();
+            }
+            if let Some(map) = json.get("characters").and_then(|v| v.as_object()) {
+                for (key, value) in map {
+                    if let Some(name) = value.as_str().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                        characters.insert(key.clone(), name.to_string());
+                    }
+                }
+            }
+            if let Some(existing_episodes) = json.get("episode_list").and_then(|v| v.as_array()) {
+                for (idx, existing) in existing_episodes.iter().enumerate() {
+                    if let Some(ep) = episode_list.get_mut(idx) {
+                        if let Some(value) = existing.get("subtitle").and_then(|v| v.as_str()) {
+                            ep.subtitle = value.to_string();
+                        }
+                        if let Some(value) = existing.get("release_date").and_then(|v| v.as_str()) {
+                            ep.release_date = value.to_string();
+                        }
+                        let tags = existing.get("tags");
+                        ep.tags = ArchiveEpisodeTags {
+                            theme: value_string_vec(tags.and_then(|t| t.get("theme"))),
+                            attribute: value_string_vec(tags.and_then(|t| t.get("attribute"))),
+                            scene: value_string_vec(tags.and_then(|t| t.get("scene"))),
+                        };
+                    }
+                }
+            }
         }
-    }).collect::<Vec<_>>();
+    }
 
     Ok(ArchiveDraft {
         dir_path: dir_path.to_string(),
-        title: title_override.filter(|s| !s.trim().is_empty()).unwrap_or(dir_name),
+        title,
         episodes: episode_list.len() as i32,
-        studio: String::new(),
-        synopsis: String::new(),
-        characters: std::collections::HashMap::new(),
+        studio,
+        synopsis,
+        characters,
         episode_list,
         cover_path: find_existing_cover(&data_dir, "cover"),
         getchu_url: String::new(),
@@ -642,7 +908,11 @@ fn save_archive_episode_covers(input: ArchiveEpisodeCoverSaveInput) -> Result<Ve
     let data_dir = std::path::Path::new(&input.dir_path).join("data");
     let mut saved = Vec::new();
     for cover in &input.covers {
-        saved.push(write_image_data(&data_dir, &format!("cover_ep{}", cover.id), &cover.image_data)?);
+        saved.push(write_image_data(
+            &data_dir,
+            &format!("cover_ep{}", cover.id),
+            &cover.image_data,
+        )?);
     }
     Ok(saved)
 }
@@ -660,18 +930,22 @@ fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
         write_image_data(&data_dir, "cover", cover_data)?;
     }
 
-    let episodes_json: Vec<serde_json::Value> = input.episode_list.iter().map(|ep| {
-        serde_json::json!({
-            "id": ep.id,
-            "subtitle": ep.subtitle,
-            "release_date": ep.release_date,
-            "tags": {
-                "theme": ep.tags.theme,
-                "attribute": ep.tags.attribute,
-                "scene": ep.tags.scene,
-            }
+    let episodes_json: Vec<serde_json::Value> = input
+        .episode_list
+        .iter()
+        .map(|ep| {
+            serde_json::json!({
+                "id": ep.id,
+                "subtitle": ep.subtitle,
+                "release_date": ep.release_date,
+                "tags": {
+                    "theme": ep.tags.theme,
+                    "attribute": ep.tags.attribute,
+                    "scene": ep.tags.scene,
+                }
+            })
         })
-    }).collect();
+        .collect();
 
     let json = serde_json::json!({
         "title": input.title,
@@ -688,6 +962,95 @@ fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
     Ok(out_path.to_string_lossy().to_string())
 }
 
+fn validate_archive_meta_json(json: &serde_json::Value, dir_path: &str) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if !json.is_object() {
+        return vec!["根节点必须是 JSON 对象".to_string()];
+    }
+    if !value_non_empty_string(json.get("title")) {
+        reasons.push("缺少 title".to_string());
+    }
+    if !value_non_empty_string(json.get("studio")) {
+        reasons.push("缺少 studio".to_string());
+    }
+    if !value_non_empty_string(json.get("synopsis")) {
+        reasons.push("缺少 synopsis".to_string());
+    }
+    let characters_complete = json
+        .get("characters")
+        .and_then(|v| v.as_object())
+        .map(|m| {
+            !m.is_empty()
+                && m.values()
+                    .any(|v| v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false))
+        })
+        .unwrap_or(false);
+    if !characters_complete {
+        reasons.push("缺少 characters".to_string());
+    }
+
+    let episodes = json.get("episode_list").and_then(|v| v.as_array());
+    if episodes.is_none() {
+        reasons.push("缺少 episode_list 数组".to_string());
+    }
+    let episode_len = episodes.map(|e| e.len()).unwrap_or(0);
+    if json
+        .get("episodes")
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize)
+        != Some(episode_len)
+    {
+        reasons.push("episodes 必须等于 episode_list 数量".to_string());
+    }
+
+    let (video_count, _) = folder_video_stats(dir_path);
+    if video_count > 0 && episode_len != video_count as usize {
+        reasons.push("episode_list 数量必须等于视频数量".to_string());
+    }
+
+    if let Some(episodes) = episodes {
+        for (idx, ep) in episodes.iter().enumerate() {
+            let n = idx + 1;
+            if ep.get("id").and_then(|v| v.as_i64()).is_none() {
+                reasons.push(format!("第{}集缺少 id", n));
+            }
+            if !value_non_empty_string(ep.get("release_date")) {
+                reasons.push(format!("第{}集缺少 release_date", n));
+            }
+            let tags = ep.get("tags");
+            let has_tags = value_non_empty_array(tags.and_then(|t| t.get("theme")))
+                || value_non_empty_array(tags.and_then(|t| t.get("attribute")))
+                || value_non_empty_array(tags.and_then(|t| t.get("scene")));
+            if !has_tags {
+                reasons.push(format!("第{}集缺少 tags", n));
+            }
+        }
+    }
+
+    reasons
+}
+
+#[tauri::command]
+fn save_archive_json(dir_path: String, json_text: String) -> Result<String, String> {
+    let path = std::path::Path::new(&dir_path);
+    if !path.is_dir() {
+        return Err("不是目录".to_string());
+    }
+    let json: serde_json::Value =
+        serde_json::from_str(&json_text).map_err(|e| format!("JSON 格式错误: {}", e))?;
+    let reasons = validate_archive_meta_json(&json, &dir_path);
+    if !reasons.is_empty() {
+        return Err(format!("JSON 不完整: {}", reasons.join("、")));
+    }
+
+    let data_dir = path.join("data");
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let out_path = data_dir.join("meta.json");
+    let json_str = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    std::fs::write(&out_path, format!("{}\n", json_str)).map_err(|e| e.to_string())?;
+    Ok(out_path.to_string_lossy().to_string())
+}
+
 fn absolutize_url(base: &str, url: &str) -> String {
     if url.starts_with("http://") || url.starts_with("https://") {
         return url.to_string();
@@ -697,7 +1060,12 @@ fn absolutize_url(base: &str, url: &str) -> String {
     }
     if url.starts_with('/') {
         if let Ok(parsed) = reqwest::Url::parse(base) {
-            return format!("{}://{}{}", parsed.scheme(), parsed.host_str().unwrap_or(""), url);
+            return format!(
+                "{}://{}{}",
+                parsed.scheme(),
+                parsed.host_str().unwrap_or(""),
+                url
+            );
         }
     }
     reqwest::Url::parse(base)
@@ -734,31 +1102,65 @@ fn fetch_html(url: &str) -> Result<String, String> {
 
 fn selector_text(doc: &scraper::Html, selector: &str) -> Option<String> {
     let sel = scraper::Selector::parse(selector).ok()?;
-    doc.select(&sel).next().map(|el| el.text().collect::<Vec<_>>().join(" ").trim().to_string())
+    doc.select(&sel)
+        .next()
+        .map(|el| el.text().collect::<Vec<_>>().join(" ").trim().to_string())
         .filter(|s| !s.is_empty())
 }
 
 fn selector_attr(doc: &scraper::Html, selector: &str, attr: &str) -> Option<String> {
     let sel = scraper::Selector::parse(selector).ok()?;
-    doc.select(&sel).next().and_then(|el| el.value().attr(attr)).map(|s| s.to_string())
+    doc.select(&sel)
+        .next()
+        .and_then(|el| el.value().attr(attr))
+        .map(|s| s.to_string())
 }
 
-fn push_image_candidate(out: &mut Vec<ImageCandidate>, source: &str, base: &str, url: Option<String>) {
+fn push_image_candidate(
+    out: &mut Vec<ImageCandidate>,
+    source: &str,
+    base: &str,
+    url: Option<String>,
+) {
     if let Some(url) = url {
         let u = absolutize_url(base, url.trim());
         if !u.is_empty() && !out.iter().any(|c| c.url == u) {
-            out.push(ImageCandidate { source: source.to_string(), url: u });
+            out.push(ImageCandidate {
+                source: source.to_string(),
+                url: u,
+            });
         }
     }
 }
 
 fn clean_hanime_tag(tag: &str) -> Option<String> {
     let t = tag.trim().trim_matches('#').to_string();
-    if t.is_empty() { return None; }
+    if t.is_empty() {
+        return None;
+    }
     let lower = t.to_lowercase();
     let blocked = [
-        "1080p", "720p", "4k", "60fps", "中文字幕", "中文", "繁體中文", "字幕", "無碼", "无码",
-        "uncensored", "hd", "fhd", "痴漢", "痴汉", "大屌", "巨根", "男", "大叔", "肥宅", "正太",
+        "1080p",
+        "720p",
+        "4k",
+        "60fps",
+        "中文字幕",
+        "中文",
+        "繁體中文",
+        "字幕",
+        "無碼",
+        "无码",
+        "uncensored",
+        "hd",
+        "fhd",
+        "痴漢",
+        "痴汉",
+        "大屌",
+        "巨根",
+        "男",
+        "大叔",
+        "肥宅",
+        "正太",
     ];
     if blocked.iter().any(|b| lower.contains(&b.to_lowercase())) {
         return None;
@@ -770,11 +1172,33 @@ fn categorize_tags(tags: &[String]) -> ArchiveEpisodeTags {
     let mut result = ArchiveEpisodeTags::default();
     for tag in tags {
         let lower = tag.to_lowercase();
-        let target = if ["學校", "学校", "教室", "校園", "校园", "公眾", "公众", "溫泉", "温泉", "職場", "办公室", "體操服", "泳裝", "泳装"]
-            .iter().any(|k| lower.contains(&k.to_lowercase())) {
+        let target = if [
+            "學校",
+            "学校",
+            "教室",
+            "校園",
+            "校园",
+            "公眾",
+            "公众",
+            "溫泉",
+            "温泉",
+            "職場",
+            "办公室",
+            "體操服",
+            "泳裝",
+            "泳装",
+        ]
+        .iter()
+        .any(|k| lower.contains(&k.to_lowercase()))
+        {
             &mut result.scene
-        } else if ["巨乳", "貧乳", "贫乳", "黑絲", "黑丝", "眼鏡", "眼镜", "人妻", "jk", "蘿莉", "萝莉", "妹", "白虎"]
-            .iter().any(|k| lower.contains(&k.to_lowercase())) {
+        } else if [
+            "巨乳", "貧乳", "贫乳", "黑絲", "黑丝", "眼鏡", "眼镜", "人妻", "jk", "蘿莉", "萝莉",
+            "妹", "白虎",
+        ]
+        .iter()
+        .any(|k| lower.contains(&k.to_lowercase()))
+        {
             &mut result.attribute
         } else {
             &mut result.theme
@@ -794,21 +1218,50 @@ fn scrape_page(url: &str, source: &str) -> Result<ArchiveScrapeResult, String> {
     result.title = selector_attr(&doc, "meta[property='og:title']", "content")
         .or_else(|| selector_text(&doc, "h1"))
         .or_else(|| selector_text(&doc, "title"))
-        .map(|s| s.replace(" - Getchu.com", "").replace(" | Hanime1.me", "").trim().to_string());
+        .map(|s| {
+            s.replace(" - Getchu.com", "")
+                .replace(" | Hanime1.me", "")
+                .trim()
+                .to_string()
+        });
 
     result.synopsis = selector_attr(&doc, "meta[name='description']", "content")
         .or_else(|| selector_attr(&doc, "meta[property='og:description']", "content"));
 
-    push_image_candidate(&mut result.cover_candidates, source, url, selector_attr(&doc, "meta[property='og:image']", "content"));
-    push_image_candidate(&mut result.cover_candidates, source, url, selector_attr(&doc, "meta[name='twitter:image']", "content"));
-    push_image_candidate(&mut result.cover_candidates, source, url, selector_attr(&doc, "link[rel='image_src']", "href"));
+    push_image_candidate(
+        &mut result.cover_candidates,
+        source,
+        url,
+        selector_attr(&doc, "meta[property='og:image']", "content"),
+    );
+    push_image_candidate(
+        &mut result.cover_candidates,
+        source,
+        url,
+        selector_attr(&doc, "meta[name='twitter:image']", "content"),
+    );
+    push_image_candidate(
+        &mut result.cover_candidates,
+        source,
+        url,
+        selector_attr(&doc, "link[rel='image_src']", "href"),
+    );
 
     if let Ok(sel) = scraper::Selector::parse("img") {
         for img in doc.select(&sel).take(20) {
             if let Some(src) = img.value().attr("src") {
                 let lower = src.to_lowercase();
-                if lower.contains("cover") || lower.contains("package") || lower.contains("img") || source == "hanime1" {
-                    push_image_candidate(&mut result.cover_candidates, source, url, Some(src.to_string()));
+                if lower.contains("cover")
+                    || lower.contains("package")
+                    || lower.contains("img")
+                    || source == "hanime1"
+                {
+                    push_image_candidate(
+                        &mut result.cover_candidates,
+                        source,
+                        url,
+                        Some(src.to_string()),
+                    );
                 }
             }
         }
@@ -819,7 +1272,9 @@ fn scrape_page(url: &str, source: &str) -> Result<ArchiveScrapeResult, String> {
             for a in doc.select(&sel) {
                 let href = a.value().attr("href").unwrap_or("").to_lowercase();
                 let text = a.text().collect::<Vec<_>>().join("").trim().to_string();
-                if (href.contains("tag") || href.contains("search") || href.contains("genre")) && !text.is_empty() {
+                if (href.contains("tag") || href.contains("search") || href.contains("genre"))
+                    && !text.is_empty()
+                {
                     if let Some(tag) = clean_hanime_tag(&text) {
                         if !result.raw_tags.iter().any(|t| t == &tag) {
                             result.raw_tags.push(tag);
@@ -845,11 +1300,24 @@ fn scrape_page(url: &str, source: &str) -> Result<ArchiveScrapeResult, String> {
     if source == "getchu" {
         let text = doc.root_element().text().collect::<Vec<_>>().join("\n");
         for line in text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()) {
-            if result.release_date.is_none() && (line.contains("発売日") || line.contains("発売予定")) {
-                result.release_date = Some(line.replace("発売日", "").replace("発売予定", "").trim().to_string());
+            if result.release_date.is_none()
+                && (line.contains("発売日") || line.contains("発売予定"))
+            {
+                result.release_date = Some(
+                    line.replace("発売日", "")
+                        .replace("発売予定", "")
+                        .trim()
+                        .to_string(),
+                );
             }
-            if result.studio.is_none() && (line.contains("ブランド") || line.contains("メーカー")) {
-                result.studio = Some(line.replace("ブランド", "").replace("メーカー", "").trim().to_string());
+            if result.studio.is_none() && (line.contains("ブランド") || line.contains("メーカー"))
+            {
+                result.studio = Some(
+                    line.replace("ブランド", "")
+                        .replace("メーカー", "")
+                        .trim()
+                        .to_string(),
+                );
             }
         }
     }
@@ -858,7 +1326,10 @@ fn scrape_page(url: &str, source: &str) -> Result<ArchiveScrapeResult, String> {
 }
 
 #[tauri::command]
-fn scrape_archive_sources(getchu_url: Option<String>, hanime_url: Option<String>) -> Result<ArchiveScrapeResult, String> {
+fn scrape_archive_sources(
+    getchu_url: Option<String>,
+    hanime_url: Option<String>,
+) -> Result<ArchiveScrapeResult, String> {
     let mut merged = ArchiveScrapeResult::default();
     if let Some(url) = getchu_url.filter(|u| !u.trim().is_empty()) {
         if let Ok(getchu) = scrape_page(&url, "getchu") {
@@ -871,8 +1342,12 @@ fn scrape_archive_sources(getchu_url: Option<String>, hanime_url: Option<String>
     }
     if let Some(url) = hanime_url.filter(|u| !u.trim().is_empty()) {
         if let Ok(hanime) = scrape_page(&url, "hanime1") {
-            if merged.title.is_none() { merged.title = hanime.title; }
-            if merged.synopsis.is_none() { merged.synopsis = hanime.synopsis; }
+            if merged.title.is_none() {
+                merged.title = hanime.title;
+            }
+            if merged.synopsis.is_none() {
+                merged.synopsis = hanime.synopsis;
+            }
             merged.cover_candidates.extend(hanime.cover_candidates);
             merged.raw_tags = hanime.raw_tags;
             merged.tags = hanime.tags;
@@ -885,7 +1360,9 @@ fn normalize_title_for_duplicate(title: &str) -> String {
     title
         .to_lowercase()
         .chars()
-        .filter(|c| !c.is_whitespace() && !matches!(c, '-' | '_' | '[' | ']' | '(' | ')' | '（' | '）'))
+        .filter(|c| {
+            !c.is_whitespace() && !matches!(c, '-' | '_' | '[' | ']' | '(' | ')' | '（' | '）')
+        })
         .collect()
 }
 
@@ -906,17 +1383,28 @@ fn folder_video_stats(folder_path: &str) -> (i32, u64) {
 
 fn duplicate_signature(title: &str, video_count: i32, total_size: u64) -> String {
     let normalized = normalize_title_for_duplicate(title);
-    let size_bucket = if total_size > 0 { total_size / 1_048_576 } else { 0 };
+    let size_bucket = if total_size > 0 {
+        total_size / 1_048_576
+    } else {
+        0
+    };
     format!("{}|{}|{}", normalized, video_count, size_bucket)
 }
 
 #[tauri::command]
-fn detect_duplicates(root_path: String, db: State<Database>) -> Result<Vec<DuplicateGroup>, String> {
+fn detect_duplicates(
+    root_path: String,
+    db: State<Database>,
+) -> Result<Vec<DuplicateGroup>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buckets: std::collections::HashMap<String, Vec<DuplicateItem>> = std::collections::HashMap::new();
+    let mut buckets: std::collections::HashMap<String, Vec<DuplicateItem>> =
+        std::collections::HashMap::new();
 
-    let mut stmt = conn.prepare("SELECT Title, FolderPath FROM Works").map_err(|e| e.to_string())?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+    let mut stmt = conn
+        .prepare("SELECT Title, FolderPath FROM Works")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
         .map_err(|e| e.to_string())?;
     for row in rows.flatten() {
         let (video_count, total_size) = folder_video_stats(&row.1);
@@ -935,15 +1423,28 @@ fn detect_duplicates(root_path: String, db: State<Database>) -> Result<Vec<Dupli
         if let Ok(entries) = std::fs::read_dir(root) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if !p.is_dir() { continue; }
+                if !p.is_dir() {
+                    continue;
+                }
                 let folder_path = p.to_string_lossy().to_string();
-                let title = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-                if title.is_empty() { continue; }
+                let title = p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                if title.is_empty() {
+                    continue;
+                }
                 let (video_count, total_size) = folder_video_stats(&folder_path);
-                if video_count <= 0 { continue; }
+                if video_count <= 0 {
+                    continue;
+                }
                 let signature = duplicate_signature(&title, video_count, total_size);
                 let list = buckets.entry(signature).or_default();
-                if !list.iter().any(|item| item.folder_path.eq_ignore_ascii_case(&folder_path)) {
+                if !list
+                    .iter()
+                    .any(|item| item.folder_path.eq_ignore_ascii_case(&folder_path))
+                {
                     list.push(DuplicateItem {
                         title,
                         folder_path,
@@ -956,11 +1457,17 @@ fn detect_duplicates(root_path: String, db: State<Database>) -> Result<Vec<Dupli
         }
     }
 
-    let mut groups: Vec<DuplicateGroup> = buckets.into_iter()
+    let mut groups: Vec<DuplicateGroup> = buckets
+        .into_iter()
         .filter(|(_, items)| items.len() > 1)
         .map(|(signature, items)| DuplicateGroup { signature, items })
         .collect();
-    groups.sort_by(|a, b| b.items.len().cmp(&a.items.len()).then_with(|| a.signature.cmp(&b.signature)));
+    groups.sort_by(|a, b| {
+        b.items
+            .len()
+            .cmp(&a.items.len())
+            .then_with(|| a.signature.cmp(&b.signature))
+    });
     Ok(groups)
 }
 
@@ -974,11 +1481,19 @@ fn list_unarchived_folders(root_path: String) -> Result<Vec<UnarchivedFolder>, S
     if let Ok(entries) = std::fs::read_dir(root) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if !path.is_dir() { continue; }
+            if !path.is_dir() {
+                continue;
+            }
             let folder_path = path.to_string_lossy().to_string();
-            let title = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            let title = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
             let (video_count, _) = folder_video_stats(&folder_path);
-            if video_count <= 0 { continue; }
+            if video_count <= 0 {
+                continue;
+            }
             let data_dir = path.join("data");
             let meta_json = data_dir.join("meta.json");
             let missing_reasons = archive_missing_reasons(&folder_path);
@@ -1024,7 +1539,8 @@ pub fn init_db() -> Database {
     let path = get_db_path();
     let conn = Connection::open(&path).expect("Failed to open database");
 
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;").ok();
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+        .ok();
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS Works (
@@ -1059,36 +1575,59 @@ pub fn init_db() -> Database {
             PRIMARY KEY (WorkId, TagId),
             FOREIGN KEY (WorkId) REFERENCES Works(Id) ON DELETE CASCADE,
             FOREIGN KEY (TagId) REFERENCES Tags(Id) ON DELETE CASCADE
-        );"
-    ).expect("Failed to create tables");
+        );",
+    )
+    .expect("Failed to create tables");
 
     seed_demo_data(&conn);
 
-    Database { conn: Mutex::new(conn) }
+    Database {
+        conn: Mutex::new(conn),
+    }
 }
 
 fn seed_demo_data(conn: &Connection) {
     let count: i64 = conn
         .query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0))
         .unwrap_or(0);
-    if count > 0 { return; }
+    if count > 0 {
+        return;
+    }
 
     // Seed tags
     let tag_data = [
-        ("纯爱", "剧情"), ("催眠", "剧情"), ("NTR", "剧情"), ("校园", "剧情"),
-        ("人妻", "人物"), ("萝莉", "人物"), ("妹系", "人物"),
-        ("巨乳", "属性"), ("黑丝", "属性"), ("眼镜", "属性"),
-        ("PoRO", "制作"), ("Queen Bee", "制作"), ("Poro", "制作"),
+        ("纯爱", "剧情"),
+        ("催眠", "剧情"),
+        ("NTR", "剧情"),
+        ("校园", "剧情"),
+        ("人妻", "人物"),
+        ("萝莉", "人物"),
+        ("妹系", "人物"),
+        ("巨乳", "属性"),
+        ("黑丝", "属性"),
+        ("眼镜", "属性"),
+        ("PoRO", "制作"),
+        ("Queen Bee", "制作"),
+        ("Poro", "制作"),
     ];
 
     let mut tag_ids = Vec::new();
     for (name, cat) in &tag_data {
-        conn.execute("INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)", params![name, cat]).ok();
-        let id: i64 = conn.query_row("SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| r.get(0)).unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)",
+            params![name, cat],
+        )
+        .ok();
+        let id: i64 = conn
+            .query_row("SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| {
+                r.get(0)
+            })
+            .unwrap();
         tag_ids.push((*name, id));
     }
 
-    let tag_id_map: std::collections::HashMap<&str, i64> = tag_ids.iter().map(|(n, i)| (*n, *i)).collect();
+    let tag_id_map: std::collections::HashMap<&str, i64> =
+        tag_ids.iter().map(|(n, i)| (*n, *i)).collect();
 
     // Seed works
     let works = vec![
@@ -1121,14 +1660,23 @@ fn seed_demo_data(conn: &Connection) {
             };
             conn.execute(
                 "INSERT INTO Episodes (WorkId, Number, Title, VideoPath) VALUES (?1, ?2, ?3, ?4)",
-                params![work_id, (i + 1) as i32, ep_display, format!("D:\\HAnime\\{}\\{}.mp4", title, ep_title)],
-            ).ok();
+                params![
+                    work_id,
+                    (i + 1) as i32,
+                    ep_display,
+                    format!("D:\\HAnime\\{}\\{}.mp4", title, ep_title)
+                ],
+            )
+            .ok();
         }
 
         for tag_name in tags {
             if let Some(tid) = tag_id_map.get(tag_name) {
-                conn.execute("INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
-                    params![work_id, tid]).ok();
+                conn.execute(
+                    "INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
+                    params![work_id, tid],
+                )
+                .ok();
             }
         }
     }
@@ -1145,22 +1693,24 @@ fn get_works(db: State<Database>) -> Result<Vec<Work>, String> {
          FROM Works w ORDER BY w.UpdatedAt DESC"
     ).map_err(|e| e.to_string())?;
 
-    let works = stmt.query_map([], |row| {
-        Ok(Work {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            year: row.get(2)?,
-            month: row.get(3)?,
-            studio: row.get(4)?,
-            description: row.get(5)?,
-            cover_path: row.get(6)?,
-            folder_path: row.get(7)?,
-            episode_count: row.get(8)?,
+    let works = stmt
+        .query_map([], |row| {
+            Ok(Work {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                year: row.get(2)?,
+                month: row.get(3)?,
+                studio: row.get(4)?,
+                description: row.get(5)?,
+                cover_path: row.get(6)?,
+                folder_path: row.get(7)?,
+                episode_count: row.get(8)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .filter(|w| is_archive_complete(&w.folder_path))
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .filter(|w| is_archive_complete(&w.folder_path))
+        .collect();
 
     Ok(works)
 }
@@ -1183,22 +1733,24 @@ fn search_works(keyword: String, db: State<Database>) -> Result<Vec<Work>, Strin
          ORDER BY w.UpdatedAt DESC"
     ).map_err(|e| e.to_string())?;
 
-    let works = stmt.query_map(params![kw], |row| {
-        Ok(Work {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            year: row.get(2)?,
-            month: row.get(3)?,
-            studio: row.get(4)?,
-            description: row.get(5)?,
-            cover_path: row.get(6)?,
-            folder_path: row.get(7)?,
-            episode_count: row.get(8)?,
+    let works = stmt
+        .query_map(params![kw], |row| {
+            Ok(Work {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                year: row.get(2)?,
+                month: row.get(3)?,
+                studio: row.get(4)?,
+                description: row.get(5)?,
+                cover_path: row.get(6)?,
+                folder_path: row.get(7)?,
+                episode_count: row.get(8)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .filter(|w| is_archive_complete(&w.folder_path))
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .filter(|w| is_archive_complete(&w.folder_path))
+        .collect();
 
     Ok(works)
 }
@@ -1231,54 +1783,67 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
         "SELECT Id, WorkId, Number, Title, VideoPath, CoverPath FROM Episodes WHERE WorkId = ?1 ORDER BY Number"
     ).map_err(|e| e.to_string())?;
 
-    let episodes = ep_stmt.query_map(params![work_id], |row| {
-        Ok(Episode {
-            id: row.get(0)?,
-            work_id: row.get(1)?,
-            number: row.get(2)?,
-            title: row.get(3)?,
-            video_path: row.get(4)?,
-            cover_path: row.get(5)?,
+    let episodes = ep_stmt
+        .query_map(params![work_id], |row| {
+            Ok(Episode {
+                id: row.get(0)?,
+                work_id: row.get(1)?,
+                number: row.get(2)?,
+                title: row.get(3)?,
+                video_path: row.get(4)?,
+                cover_path: row.get(5)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
     // Get tags
-    let mut tag_stmt = conn.prepare(
-        "SELECT t.Id, t.Name, t.Category FROM Tags t
+    let mut tag_stmt = conn
+        .prepare(
+            "SELECT t.Id, t.Name, t.Category FROM Tags t
          INNER JOIN WorkTags wt ON t.Id = wt.TagId
-         WHERE wt.WorkId = ?1 ORDER BY t.Category, t.Name"
-    ).map_err(|e| e.to_string())?;
+         WHERE wt.WorkId = ?1 ORDER BY t.Category, t.Name",
+        )
+        .map_err(|e| e.to_string())?;
 
-    let tags = tag_stmt.query_map(params![work_id], |row| {
-        Ok(Tag {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            category: row.get(2)?,
+    let tags = tag_stmt
+        .query_map(params![work_id], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                category: row.get(2)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
-    Ok(WorkDetail { work, episodes, tags })
+    Ok(WorkDetail {
+        work,
+        episodes,
+        tags,
+    })
 }
 
 #[tauri::command]
 fn get_tags(db: State<Database>) -> Result<Vec<Tag>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT Id, Name, Category FROM Tags ORDER BY Category, Name")
+    let mut stmt = conn
+        .prepare("SELECT Id, Name, Category FROM Tags ORDER BY Category, Name")
         .map_err(|e| e.to_string())?;
 
-    let tags = stmt.query_map([], |row| {
-        Ok(Tag {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            category: row.get(2)?,
+    let tags = stmt
+        .query_map([], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                category: row.get(2)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
     Ok(tags)
 }
@@ -1300,22 +1865,24 @@ fn get_works_sorted(sort_by: String, db: State<Database>) -> Result<Vec<Work>, S
         order
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let works = stmt.query_map([], |row| {
-        Ok(Work {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            year: row.get(2)?,
-            month: row.get(3)?,
-            studio: row.get(4)?,
-            description: row.get(5)?,
-            cover_path: row.get(6)?,
-            folder_path: row.get(7)?,
-            episode_count: row.get(8)?,
+    let works = stmt
+        .query_map([], |row| {
+            Ok(Work {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                year: row.get(2)?,
+                month: row.get(3)?,
+                studio: row.get(4)?,
+                description: row.get(5)?,
+                cover_path: row.get(6)?,
+                folder_path: row.get(7)?,
+                episode_count: row.get(8)?,
+            })
         })
-    }).map_err(|e| e.to_string())?
-    .filter_map(|r| r.ok())
-    .filter(|w| is_archive_complete(&w.folder_path))
-    .collect();
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .filter(|w| is_archive_complete(&w.folder_path))
+        .collect();
     Ok(works)
 }
 
@@ -1329,38 +1896,98 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
          FROM Works w ORDER BY w.UpdatedAt DESC"
     ).map_err(|e| e.to_string())?;
 
-    let works: Vec<(i64,String,i32,i32,String,Option<String>,Option<String>,String,i64)> = stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?))
-    }).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+    let works: Vec<(
+        i64,
+        String,
+        i32,
+        i32,
+        String,
+        Option<String>,
+        Option<String>,
+        String,
+        i64,
+    )> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
-    let mut tag_stmt = conn.prepare(
-        "SELECT wt.WorkId, t.Id, t.Name, t.Category FROM Tags t
-         INNER JOIN WorkTags wt ON t.Id = wt.TagId ORDER BY t.Category, t.Name"
-    ).map_err(|e| e.to_string())?;
+    let mut tag_stmt = conn
+        .prepare(
+            "SELECT wt.WorkId, t.Id, t.Name, t.Category FROM Tags t
+         INNER JOIN WorkTags wt ON t.Id = wt.TagId ORDER BY t.Category, t.Name",
+        )
+        .map_err(|e| e.to_string())?;
 
-    let tag_rows: Vec<(i64,i64,String,String)> = tag_stmt.query_map([], |row| {
-        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-    }).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+    let tag_rows: Vec<(i64, i64, String, String)> = tag_stmt
+        .query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
 
     let mut tags_map: std::collections::HashMap<i64, Vec<Tag>> = std::collections::HashMap::new();
     for (work_id, tag_id, name, category) in tag_rows {
-        tags_map.entry(work_id).or_default().push(Tag { id: tag_id, name, category });
+        tags_map.entry(work_id).or_default().push(Tag {
+            id: tag_id,
+            name,
+            category,
+        });
     }
 
-    let result: Vec<WorkWithTags> = works.into_iter()
-        .filter(|(_,_,_,_,_,_,_,folder_path,_)| is_archive_complete(folder_path))
-        .map(|(id,title,year,month,studio,description,cover_path,folder_path,episode_count)| {
-        WorkWithTags {
-            id, title, year, month, studio, description, cover_path, folder_path, episode_count,
-            tags: tags_map.remove(&id).unwrap_or_default(),
-        }
-    }).collect();
+    let result: Vec<WorkWithTags> = works
+        .into_iter()
+        .filter(|(_, _, _, _, _, _, _, folder_path, _)| is_archive_complete(folder_path))
+        .map(
+            |(
+                id,
+                title,
+                year,
+                month,
+                studio,
+                description,
+                cover_path,
+                folder_path,
+                episode_count,
+            )| {
+                WorkWithTags {
+                    id,
+                    title,
+                    year,
+                    month,
+                    studio,
+                    description,
+                    cover_path,
+                    folder_path,
+                    episode_count,
+                    tags: tags_map.remove(&id).unwrap_or_default(),
+                }
+            },
+        )
+        .collect();
 
     Ok(result)
 }
 
 #[tauri::command]
-fn update_work_tags(work_id: i64, tag_names: Vec<String>, db: State<Database>) -> Result<(), String> {
+fn update_work_tags(
+    work_id: i64,
+    tag_names: Vec<String>,
+    db: State<Database>,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     // Remove all existing tag associations
@@ -1370,36 +1997,48 @@ fn update_work_tags(work_id: i64, tag_names: Vec<String>, db: State<Database>) -
     // Insert new tags
     for name in &tag_names {
         let name = name.trim();
-        if name.is_empty() { continue; }
+        if name.is_empty() {
+            continue;
+        }
         // Insert tag if not exists, get its id
         conn.execute(
             "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, '')",
             params![name],
-        ).map_err(|e| e.to_string())?;
-        let tag_id: i64 = conn.query_row(
-            "SELECT Id FROM Tags WHERE Name = ?1",
-            params![name],
-            |r| r.get(0),
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
+        let tag_id: i64 = conn
+            .query_row("SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| {
+                r.get(0)
+            })
+            .map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
             params![work_id, tag_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 #[tauri::command]
-fn add_work(title: String, year: i32, month: i32, studio: String,
-            description: Option<String>, folder_path: String,
-            tag_names: Vec<String>, db: State<Database>) -> Result<i64, String> {
+fn add_work(
+    title: String,
+    year: i32,
+    month: i32,
+    studio: String,
+    description: Option<String>,
+    folder_path: String,
+    tag_names: Vec<String>,
+    db: State<Database>,
+) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     conn.execute(
         "INSERT INTO Works (Title, Year, Month, Studio, Description, FolderPath)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![title, year, month, studio, description, folder_path],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     let work_id = conn.last_insert_rowid();
 
     // Scan folder for videos and create episodes
@@ -1411,8 +2050,15 @@ fn add_work(title: String, year: i32, month: i32, studio: String,
                 for entry in entries.flatten() {
                     let p = entry.path();
                     if p.is_file() {
-                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                        if matches!(ext.as_str(), "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm") {
+                        let ext = p
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .unwrap_or("")
+                            .to_lowercase();
+                        if matches!(
+                            ext.as_str(),
+                            "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"
+                        ) {
                             videos.push(p);
                         }
                     }
@@ -1434,14 +2080,24 @@ fn add_work(title: String, year: i32, month: i32, studio: String,
     // Attach tags
     for name in &tag_names {
         let name = name.trim();
-        if name.is_empty() { continue; }
-        conn.execute("INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, '')", params![name])
+        if name.is_empty() {
+            continue;
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, '')",
+            params![name],
+        )
+        .map_err(|e| e.to_string())?;
+        let tag_id: i64 = conn
+            .query_row("SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| {
+                r.get(0)
+            })
             .map_err(|e| e.to_string())?;
-        let tag_id: i64 = conn.query_row(
-            "SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| r.get(0)
-        ).map_err(|e| e.to_string())?;
-        conn.execute("INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
-            params![work_id, tag_id]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
+            params![work_id, tag_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
 
     Ok(work_id)
@@ -1455,8 +2111,11 @@ fn scan_folder(root_path: String, db: State<Database>) -> Result<Vec<String>, St
     }
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT FolderPath FROM Works").map_err(|e| e.to_string())?;
-    let existing: Vec<String> = stmt.query_map([], |r| r.get::<_, String>(0))
+    let mut stmt = conn
+        .prepare("SELECT FolderPath FROM Works")
+        .map_err(|e| e.to_string())?;
+    let existing: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .map(|p| p.to_lowercase())
@@ -1465,19 +2124,30 @@ fn scan_folder(root_path: String, db: State<Database>) -> Result<Vec<String>, St
     let mut found = Vec::new();
     if let Ok(entries) = std::fs::read_dir(path) {
         for entry in entries.flatten() {
-            if !entry.path().is_dir() { continue; }
+            if !entry.path().is_dir() {
+                continue;
+            }
             let dir_path = entry.path();
             // Check if dir has videos OR has data/ subdir
-            let has_video = std::fs::read_dir(&dir_path).ok()
+            let has_video = std::fs::read_dir(&dir_path)
+                .ok()
                 .map(|entries| {
                     entries.flatten().any(|e| {
                         e.path().is_file() && {
-                            let ext = e.path().extension()
-                                .and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-                            matches!(ext.as_str(), "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm")
+                            let ext = e
+                                .path()
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+                            matches!(
+                                ext.as_str(),
+                                "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"
+                            )
                         }
                     })
-                }).unwrap_or(false);
+                })
+                .unwrap_or(false);
             let archive_complete = is_archive_complete(&dir_path.to_string_lossy());
 
             if has_video && archive_complete {
@@ -1520,10 +2190,19 @@ fn open_folder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn update_work_cover(work_id: i64, cover_data: String, db: State<Database>) -> Result<String, String> {
+fn update_work_cover(
+    work_id: i64,
+    cover_data: String,
+    db: State<Database>,
+) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let app_data = std::env::var("APPDATA").or_else(|_| std::env::var("LOCALAPPDATA")).unwrap_or_default();
-    let cover_dir = std::path::Path::new(&app_data).join("HAnimeManager").join("cache").join("covers");
+    let app_data = std::env::var("APPDATA")
+        .or_else(|_| std::env::var("LOCALAPPDATA"))
+        .unwrap_or_default();
+    let cover_dir = std::path::Path::new(&app_data)
+        .join("HAnimeManager")
+        .join("cache")
+        .join("covers");
     std::fs::create_dir_all(&cover_dir).map_err(|e| e.to_string())?;
 
     // Decode base64 (remove data:image/...;base64, prefix if present)
@@ -1534,30 +2213,52 @@ fn update_work_cover(work_id: i64, cover_data: String, db: State<Database>) -> R
         base64_decode(&cover_data)
     };
 
-    let ext = if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" { "jpg" }
-              else if data.len() > 4 && &data[0..4] == b"\x89PNG" { "png" }
-              else { "jpg" };
+    let ext = if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" {
+        "jpg"
+    } else if data.len() > 4 && &data[0..4] == b"\x89PNG" {
+        "png"
+    } else {
+        "jpg"
+    };
     let filename = format!("work_{}.{}", work_id, ext);
     let path = cover_dir.join(&filename);
     std::fs::write(&path, &data).map_err(|e| e.to_string())?;
 
     let cover_path = path.to_string_lossy().to_string();
-    conn.execute("UPDATE Works SET CoverPath=?1 WHERE Id=?2", params![cover_path, work_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE Works SET CoverPath=?1 WHERE Id=?2",
+        params![cover_path, work_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(cover_path)
 }
 
 fn base64_decode(input: &str) -> Vec<u8> {
-    let input = input.trim().replace('\n', "").replace('\r', "").replace(' ', "");
+    let input = input
+        .trim()
+        .replace('\n', "")
+        .replace('\r', "")
+        .replace(' ', "");
     use base64::Engine as _;
-    base64::engine::general_purpose::STANDARD.decode(&input).unwrap_or_default()
+    base64::engine::general_purpose::STANDARD
+        .decode(&input)
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-fn update_episode_cover(episode_id: i64, cover_data: String, db: State<Database>) -> Result<String, String> {
+fn update_episode_cover(
+    episode_id: i64,
+    cover_data: String,
+    db: State<Database>,
+) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let app_data = std::env::var("APPDATA").or_else(|_| std::env::var("LOCALAPPDATA")).unwrap_or_default();
-    let cover_dir = std::path::Path::new(&app_data).join("HAnimeManager").join("cache").join("episodes");
+    let app_data = std::env::var("APPDATA")
+        .or_else(|_| std::env::var("LOCALAPPDATA"))
+        .unwrap_or_default();
+    let cover_dir = std::path::Path::new(&app_data)
+        .join("HAnimeManager")
+        .join("cache")
+        .join("episodes");
     std::fs::create_dir_all(&cover_dir).map_err(|e| e.to_string())?;
 
     let data = if cover_data.contains(";base64,") {
@@ -1567,16 +2268,23 @@ fn update_episode_cover(episode_id: i64, cover_data: String, db: State<Database>
         base64_decode(&cover_data)
     };
 
-    let ext = if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" { "jpg" }
-              else if data.len() > 4 && &data[0..4] == b"\x89PNG" { "png" }
-              else { "jpg" };
+    let ext = if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" {
+        "jpg"
+    } else if data.len() > 4 && &data[0..4] == b"\x89PNG" {
+        "png"
+    } else {
+        "jpg"
+    };
     let filename = format!("ep_{}.{}", episode_id, ext);
     let path = cover_dir.join(&filename);
     std::fs::write(&path, &data).map_err(|e| e.to_string())?;
 
     let cover_path = path.to_string_lossy().to_string();
-    conn.execute("UPDATE Episodes SET CoverPath=?1 WHERE Id=?2", params![cover_path, episode_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE Episodes SET CoverPath=?1 WHERE Id=?2",
+        params![cover_path, episode_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(cover_path)
 }
 
@@ -1588,7 +2296,9 @@ fn play_video(video_path: String) -> Result<(), String> {
             r"C:\Program Files\PotPlayer\PotPlayer.exe",
             r"C:\Program Files (x86)\PotPlayer\PotPlayer.exe",
         ];
-        paths.iter().find(|p| std::path::Path::new(p).exists())
+        paths
+            .iter()
+            .find(|p| std::path::Path::new(p).exists())
             .map(|s| s.to_string())
             .unwrap_or_default()
     });
@@ -1609,14 +2319,19 @@ fn play_video(video_path: String) -> Result<(), String> {
 fn add_new_tag(name: String, category: String, db: State<Database>) -> Result<i64, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let name = name.trim().to_string();
-    if name.is_empty() { return Err("Tag名称不能为空".to_string()); }
+    if name.is_empty() {
+        return Err("Tag名称不能为空".to_string());
+    }
     conn.execute(
         "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)",
         params![name, category],
-    ).map_err(|e| e.to_string())?;
-    let id: i64 = conn.query_row(
-        "SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| r.get(0)
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
+    let id: i64 = conn
+        .query_row("SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| {
+            r.get(0)
+        })
+        .map_err(|e| e.to_string())?;
     Ok(id)
 }
 
@@ -1631,30 +2346,46 @@ fn delete_tag(tag_id: i64, db: State<Database>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn update_tag(tag_id: i64, name: String, category: String, db: State<Database>) -> Result<(), String> {
+fn update_tag(
+    tag_id: i64,
+    name: String,
+    category: String,
+    db: State<Database>,
+) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE Tags SET Name = ?1, Category = ?2 WHERE Id = ?3",
         params![name, category, tag_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 fn get_years(db: State<Database>) -> Result<Vec<i32>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT DISTINCT Year FROM Works ORDER BY Year DESC")
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT Year FROM Works ORDER BY Year DESC")
         .map_err(|e| e.to_string())?;
-    let years = stmt.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+    let years = stmt
+        .query_map([], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
     Ok(years)
 }
 
 #[tauri::command]
 fn get_studios(db: State<Database>) -> Result<Vec<String>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("SELECT DISTINCT Studio FROM Works WHERE Studio != '' ORDER BY Studio")
+    let mut stmt = conn
+        .prepare("SELECT DISTINCT Studio FROM Works WHERE Studio != '' ORDER BY Studio")
         .map_err(|e| e.to_string())?;
-    let studios = stmt.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
+    let studios = stmt
+        .query_map([], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
     Ok(studios)
 }
 
@@ -1673,10 +2404,30 @@ fn sync_database(root_path: String, db: State<Database>) -> Result<SyncResult, S
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
                 if entry.path().is_dir() {
-                    let has = std::fs::read_dir(entry.path()).ok().map(|e| e.flatten().any(|f|
-                        f.path().is_file() && f.path().extension().and_then(|e| e.to_str())
-                            .map(|s| matches!(s.to_lowercase().as_str(), "mp4"|"mkv"|"avi"|"wmv"|"flv"|"mov"|"webm")).unwrap_or(false)
-                    )).unwrap_or(false);
+                    let has = std::fs::read_dir(entry.path())
+                        .ok()
+                        .map(|e| {
+                            e.flatten().any(|f| {
+                                f.path().is_file()
+                                    && f.path()
+                                        .extension()
+                                        .and_then(|e| e.to_str())
+                                        .map(|s| {
+                                            matches!(
+                                                s.to_lowercase().as_str(),
+                                                "mp4"
+                                                    | "mkv"
+                                                    | "avi"
+                                                    | "wmv"
+                                                    | "flv"
+                                                    | "mov"
+                                                    | "webm"
+                                            )
+                                        })
+                                        .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false);
                     let archive_complete = is_archive_complete(&entry.path().to_string_lossy());
                     if has && archive_complete {
                         disk_folders.push(entry.path().to_string_lossy().to_string());
@@ -1685,9 +2436,19 @@ fn sync_database(root_path: String, db: State<Database>) -> Result<SyncResult, S
             }
         }
     }
-    let mut stmt = conn.prepare("SELECT FolderPath FROM Works").map_err(|e| e.to_string())?;
-    let db_folders: Vec<String> = stmt.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?.filter_map(|r| r.ok()).collect();
-    let new_folders: Vec<_> = disk_folders.iter().filter(|d| !db_folders.iter().any(|b| b.eq_ignore_ascii_case(d))).cloned().collect();
+    let mut stmt = conn
+        .prepare("SELECT FolderPath FROM Works")
+        .map_err(|e| e.to_string())?;
+    let db_folders: Vec<String> = stmt
+        .query_map([], |r| r.get(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    let new_folders: Vec<_> = disk_folders
+        .iter()
+        .filter(|d| !db_folders.iter().any(|b| b.eq_ignore_ascii_case(d)))
+        .cloned()
+        .collect();
     let mut missing = Vec::new();
     for fp in &db_folders {
         if !std::path::Path::new(fp).exists() {
@@ -1698,7 +2459,10 @@ fn sync_database(root_path: String, db: State<Database>) -> Result<SyncResult, S
             ) { missing.push(w); }
         }
     }
-    Ok(SyncResult{new_folders,missing_works:missing})
+    Ok(SyncResult {
+        new_folders,
+        missing_works: missing,
+    })
 }
 
 #[tauri::command]
@@ -1706,9 +2470,13 @@ fn batch_import_folders(folders: Vec<String>, db: State<Database>) -> Result<i32
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut count = 0;
     for fp in folders {
-        let before: i64 = conn.query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0)).unwrap_or(0);
+        let before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0))
+            .unwrap_or(0);
         import_work_dir(&conn, &fp)?;
-        let after: i64 = conn.query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0)).unwrap_or(before);
+        let after: i64 = conn
+            .query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0))
+            .unwrap_or(before);
         if after > before {
             count += 1;
         }
@@ -1719,14 +2487,19 @@ fn batch_import_folders(folders: Vec<String>, db: State<Database>) -> Result<i32
 #[tauri::command]
 fn backup_database(backup_path: String, db: State<Database>) -> Result<(), String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("VACUUM INTO ?1", params![backup_path]).map_err(|e| e.to_string())?;
+    conn.execute("VACUUM INTO ?1", params![backup_path])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 fn restore_database(restore_path: String) -> Result<(), String> {
-    let db_path = std::env::var("APPDATA").or_else(|_| std::env::var("LOCALAPPDATA")).unwrap_or_default();
-    let db_file = std::path::Path::new(&db_path).join("HAnimeManager").join("database.db");
+    let db_path = std::env::var("APPDATA")
+        .or_else(|_| std::env::var("LOCALAPPDATA"))
+        .unwrap_or_default();
+    let db_file = std::path::Path::new(&db_path)
+        .join("HAnimeManager")
+        .join("database.db");
     std::fs::copy(&restore_path, &db_file).map_err(|e| format!("恢复失败: {}", e))?;
     Ok(())
 }
@@ -1737,10 +2510,18 @@ fn load_cover_cache(cover_paths: Vec<String>) -> Result<Vec<(String, String)>, S
     let mut result = Vec::new();
     for path in &cover_paths {
         if let Ok(data) = std::fs::read(path) {
-            let ext = if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" { "jpeg" }
-                      else if data.len() > 4 && &data[0..4] == b"\x89PNG" { "png" } else { "jpeg" };
-            let b64 = format!("data:image/{};base64,{}", ext,
-                base64::engine::general_purpose::STANDARD.encode(&data));
+            let ext = if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" {
+                "jpeg"
+            } else if data.len() > 4 && &data[0..4] == b"\x89PNG" {
+                "png"
+            } else {
+                "jpeg"
+            };
+            let b64 = format!(
+                "data:image/{};base64,{}",
+                ext,
+                base64::engine::general_purpose::STANDARD.encode(&data)
+            );
             result.push((path.clone(), b64));
         }
     }
@@ -1783,6 +2564,7 @@ pub fn run() {
             import_work_via_json,
             inspect_archive_folder,
             save_archive_draft,
+            save_archive_json,
             save_archive_episode_covers,
             scrape_archive_sources,
             detect_duplicates,

@@ -97,9 +97,10 @@
   .btn-secondary{height:32px;padding:0 13px;border:1px solid var(--line-strong);border-radius:7px;background:#fff;font-size:13px;color:#374151;cursor:pointer;font-family:inherit}
   .btn-secondary:hover{border-color:#b8c0ca;background:#f9fafb}
 
-  .settings{width:min(680px,calc(100% - 48px));padding:0;margin:auto}
-  .settings-title{font-size:22px;font-weight:700;color:#111827;margin-bottom:18px;text-align:center}
-  .settings-group{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:14px}
+  .settings{width:min(980px,calc(100% - 64px));padding:24px 0 36px;margin:0 auto}
+  .settings-title{font-size:28px;font-weight:750;color:#111827;margin-bottom:20px;text-align:left;letter-spacing:0}
+  .settings-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:16px;align-items:start}
+  .settings-group{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:14px;box-shadow:0 10px 30px rgba(15,23,42,0.04)}
   .settings-label{font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px}
   .settings-field{display:flex;align-items:center;gap:8px}
   .s-input{flex:1;height:34px;border:1px solid var(--line-strong);border-radius:7px;padding:0 10px;font-size:13px;background:#fff;outline:none;font-family:inherit}
@@ -108,10 +109,28 @@
   .settings-msg{padding:9px 12px;border-radius:7px;font-size:13px;margin-top:10px;border:1px solid transparent}
   .settings-msg.info{background:var(--primary-soft);color:#1d4ed8;border-color:#d7e5ff}
   .settings-msg.err{background:var(--danger-soft);color:var(--danger);border-color:#ffd5d5}
+  .workspace{width:min(1160px,calc(100% - 64px));padding:24px 0 36px;margin:0 auto}
+  .workspace-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
+  .workspace-title{font-size:28px;font-weight:750;color:#111827;line-height:1.2}
+  .workspace-subtitle{font-size:13px;color:var(--muted);margin-top:6px}
+  .workspace-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(15,23,42,0.04)}
+  .unarchived-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
+  .unarchived-list{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+  .unarchived-card{border:1px solid var(--line);border-radius:12px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0;transition:border-color .12s,box-shadow .12s,transform .12s}
+  .unarchived-card:hover{border-color:#c8d3e4;box-shadow:0 12px 30px rgba(15,23,42,0.08);transform:translateY(-1px)}
+  .unarchived-name{font-size:15px;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .unarchived-path{font-size:12px;color:var(--muted);line-height:1.5;word-break:break-all;margin-top:4px}
+  .unarchived-meta{display:flex;gap:6px;flex-wrap:wrap}
+  .status-pill,.reason-pill{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;font-size:12px;border:1px solid var(--line);background:#f8fafc;color:#4b5563}
+  .status-pill.warn{background:#fff8ed;border-color:#f3d7a8;color:#9a5b00}
+  .reason-list{display:flex;flex-wrap:wrap;gap:6px;min-height:24px}
+  .reason-pill{background:#fff5f5;border-color:#ffd6d6;color:#b72f2f}
+  .unarchived-actions{display:flex;justify-content:flex-end;border-top:1px solid var(--line);padding-top:12px}
   .archive{width:100%;padding:20px 32px 32px}
-  .archive-shell{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:320px minmax(0,1fr);gap:18px;align-items:start}
-  .archive-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
-  .archive-title{font-size:20px;font-weight:700;margin-bottom:14px;text-align:center}
+  .archive-shell{max-width:1240px;margin:0 auto;display:grid;grid-template-columns:360px minmax(0,1fr);gap:18px;align-items:start}
+  .archive-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(15,23,42,0.04)}
+  .archive-panel.sticky{position:sticky;top:18px}
+  .archive-title{font-size:26px;font-weight:750;margin:0 auto 18px;max-width:1240px;text-align:left}
   .archive-section-title{font-size:13px;font-weight:700;color:#111827;margin-bottom:10px}
   .archive-field{margin-bottom:10px}
   .archive-label{font-size:12px;color:var(--muted);margin-bottom:5px}
@@ -120,6 +139,7 @@
   .archive-textarea{min-height:92px;resize:vertical;padding:8px 10px;line-height:1.6}
   .archive-input:focus,.archive-textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,0.10)}
   .archive-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .json-paste{min-height:210px;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;line-height:1.55}
   .drop-zone{border:1px dashed #c5ccd7;border-radius:10px;background:#f8fafc;min-height:180px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:13px;overflow:hidden;cursor:pointer}
   .drop-zone.small{width:112px;height:63px;min-height:63px;border-radius:7px;flex-shrink:0}
   .drop-zone.dragover{border-color:var(--primary);background:var(--primary-soft)}
@@ -129,8 +149,8 @@
   .candidate.selected{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,0.12)}
   .candidate img{width:100%;aspect-ratio:3/4;object-fit:cover;background:#eef1f5;display:block}
   .candidate div{font-size:11px;color:var(--muted);padding:5px 7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .episode-editor{display:flex;gap:12px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:#fbfcfd}
-  .episode-editor-main{flex:1;min-width:0;display:grid;grid-template-columns:1fr 130px;gap:8px}
+  .episode-editor{display:flex;gap:14px;padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:#fbfcfd}
+  .episode-editor-main{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px}
   .episode-tags{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
   .archive-hint{font-size:12px;color:var(--muted);line-height:1.6;margin-top:8px}
   .tag-preview{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
@@ -160,7 +180,10 @@
     .search-box{grid-column:1/2}
     .detail-layout{grid-template-columns:1fr}
     .detail-left,.detail-cover{width:100%;max-width:320px}
+    .settings,.workspace{width:calc(100% - 32px)}
+    .settings-grid,.unarchived-toolbar{grid-template-columns:1fr}
     .archive-shell{grid-template-columns:1fr}
+    .archive-panel.sticky{position:static}
     .episode-editor-main,.episode-tags{grid-template-columns:1fr}
   }
 </style>
@@ -178,6 +201,7 @@
           <button class="search-clear" id="searchClear" onclick="clearSearch()">清除</button>
         </div>
         <div class="header-actions">
+          <button class="btn-icon" onclick="openUnarchivedPage()" title="未建档"><span>&#9633;</span><span>未建档</span></button>
           <button class="btn-icon" onclick="showPage('page-settings')" title="设置"><span>&#9881;</span><span>设置</span></button>
         </div>
       </div>
@@ -232,41 +256,46 @@
     <div class="settings">
       <div class="detail-back" onclick="showPage('page-home')">&#8592; 返回</div>
       <div class="settings-title">设置</div>
-      <div class="settings-group">
-        <div class="settings-label">媒体目录</div>
-        <div class="settings-field">
-          <input class="s-input" type="text" id="mediaPath" value="D:\HAnime">
-          <button class="btn-secondary" onclick="doScan()">扫描</button>
-          <button class="btn-secondary" onclick="doSync()">同步</button>
-          <button class="btn-secondary" onclick="doDuplicateCheck()">查重</button>
-          <button class="btn-secondary" onclick="openUnarchivedPage()">未建档</button>
+      <div class="settings-grid">
+        <div class="settings-group">
+          <div class="settings-label">媒体目录</div>
+          <div class="settings-field">
+            <input class="s-input" type="text" id="mediaPath" value="D:\HAnime">
+            <button class="btn-secondary" onclick="doScan()">扫描</button>
+            <button class="btn-secondary" onclick="doSync()">同步</button>
+            <button class="btn-secondary" onclick="doDuplicateCheck()">查重</button>
+          </div>
+          <div id="scanMsg"></div>
+          <div id="syncMsg"></div>
+          <div id="duplicateMsg"></div>
         </div>
-        <div id="scanMsg"></div>
-        <div id="syncMsg"></div>
-        <div id="duplicateMsg"></div>
-      </div>
-      <div class="settings-divider"></div>
-      <div class="settings-group">
-        <div class="settings-label">数据库</div>
-        <div class="settings-field">
-          <button class="btn-secondary" onclick="doBackup()">备份</button>
-          <button class="btn-secondary" onclick="doRestore()">恢复</button>
+        <div class="settings-group">
+          <div class="settings-label">数据库</div>
+          <div class="settings-field">
+            <button class="btn-secondary" onclick="doBackup()">备份</button>
+            <button class="btn-secondary" onclick="doRestore()">恢复</button>
+          </div>
+          <div style="margin-top:10px">
+            <input class="s-input" type="text" id="dbFilePath" placeholder="备份/恢复文件路径" style="width:100%">
+          </div>
+          <div id="dbMsg"></div>
         </div>
-        <div style="margin-top:6px">
-          <input class="s-input" type="text" id="dbFilePath" placeholder="备份/恢复文件路径" style="width:100%">
-        </div>
-        <div id="dbMsg"></div>
       </div>
     </div>
   </div>
 
   <div class="page" id="page-unarchived">
-    <div class="settings">
-      <div class="detail-back" onclick="showPage('page-settings')">&#8592; 返回设置</div>
-      <div class="settings-title">未建档 / 建档不完整</div>
-      <div class="settings-group">
-        <div class="settings-label">只显示有视频但缺少完整 data 信息的文件夹</div>
-        <div class="settings-field">
+    <div class="workspace">
+      <div class="workspace-top">
+        <div>
+          <div class="detail-back" onclick="showPage('page-home')">&#8592; 返回</div>
+          <div class="workspace-title">未建档</div>
+          <div class="workspace-subtitle">有视频但 data、meta 或封面不完整的文件夹会留在这里，补齐后再进入主页面。</div>
+        </div>
+      </div>
+      <div class="workspace-panel">
+        <div class="settings-label">扫描目录</div>
+        <div class="unarchived-toolbar">
           <input class="s-input" type="text" id="unarchivedPath" value="D:\HAnime">
           <button class="btn-secondary" onclick="loadUnarchivedFolders()">刷新</button>
         </div>
@@ -277,10 +306,10 @@
 
   <div class="page" id="page-archive">
     <div class="archive">
-      <div class="detail-back" onclick="showPage('page-settings')">&#8592; 返回设置</div>
+      <div class="detail-back" onclick="openUnarchivedPage()">&#8592; 返回未建档</div>
       <div class="archive-title">建档助手</div>
       <div class="archive-shell">
-        <div class="archive-panel">
+        <div class="archive-panel sticky">
           <div class="archive-section-title">作品目录</div>
           <div class="archive-field">
             <div class="archive-label">目录路径</div>
@@ -298,6 +327,17 @@
           <div style="height:18px"></div>
           <div class="archive-section-title">主封面</div>
           <div class="drop-zone" id="archiveCoverDrop">拖入主封面</div>
+
+          <div style="height:18px"></div>
+          <div class="archive-section-title">直接粘贴 meta.json</div>
+          <div class="archive-field">
+            <textarea class="archive-textarea json-paste" id="archiveJsonPaste" placeholder="粘贴完整 meta.json，校验通过后会直接写入 data/meta.json"></textarea>
+          </div>
+          <div class="archive-actions">
+            <button class="btn-secondary" onclick="savePastedArchiveJson()">校验并保存 JSON</button>
+          </div>
+          <div class="archive-hint">Tag 字段建议保存为数组；表单输入支持 , ， 、 ; ； 分隔。</div>
+          <div id="jsonPasteMsg"></div>
         </div>
 
         <div class="archive-panel">
@@ -819,6 +859,12 @@ function showArchiveMsg(kind, text) {
   msg.innerHTML = '<div class="settings-msg ' + kind + '">' + escHtml(text) + '</div>';
 }
 
+function showJsonPasteMsg(kind, text) {
+  var msg = document.getElementById('jsonPasteMsg');
+  if (!msg) return;
+  msg.innerHTML = '<div class="settings-msg ' + kind + '">' + escHtml(text) + '</div>';
+}
+
 async function openUnarchivedPage() {
   document.getElementById('unarchivedPath').value = document.getElementById('mediaPath').value.trim() || 'D:\\HAnime';
   showPage('page-unarchived');
@@ -836,16 +882,27 @@ async function loadUnarchivedFolders() {
       box.innerHTML = '<div class="settings-msg info">没有未建档作品</div>';
       return;
     }
-    var html = '<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">';
+    var html = '<div class="unarchived-list">';
     folders.forEach(function(item){
-      html += '<div style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px;display:flex;align-items:center;gap:10px">' +
-        '<div style="flex:1;min-width:0">' +
-          '<div style="font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escHtml(item.title) + '</div>' +
-          '<div style="font-size:12px;color:#6b7280;word-break:break-all;margin-top:3px">' + escHtml(item.folder_path) + '</div>' +
-          '<div style="font-size:12px;color:#6b7280;margin-top:3px">' + item.video_count + ' 个视频' + (item.has_meta_json ? ' / meta 不完整' : ' / 未建档') + '</div>' +
-          '<div style="font-size:12px;color:#c93535;margin-top:3px">' + escHtml((item.missing_reasons || []).slice(0, 6).join('、')) + ((item.missing_reasons || []).length > 6 ? '...' : '') + '</div>' +
+      var reasons = (item.missing_reasons || []).slice(0, 8).map(function(reason){
+        return '<span class="reason-pill">' + escHtml(reason) + '</span>';
+      }).join('');
+      if ((item.missing_reasons || []).length > 8) {
+        reasons += '<span class="reason-pill">还有 ' + ((item.missing_reasons || []).length - 8) + ' 项</span>';
+      }
+      html += '<div class="unarchived-card">' +
+        '<div>' +
+          '<div class="unarchived-name">' + escHtml(item.title) + '</div>' +
+          '<div class="unarchived-path">' + escHtml(item.folder_path) + '</div>' +
         '</div>' +
-        '<button class="btn-secondary" onclick="openArchiveAssistant(\'' + escAttr(item.folder_path) + '\')">建档</button>' +
+        '<div class="unarchived-meta">' +
+          '<span class="status-pill">' + item.video_count + ' 个视频</span>' +
+          '<span class="status-pill warn">' + (item.has_meta_json ? 'meta 不完整' : '未建档') + '</span>' +
+        '</div>' +
+        '<div class="reason-list">' + reasons + '</div>' +
+        '<div class="unarchived-actions">' +
+          '<button class="btn-secondary" onclick="openArchiveAssistant(\'' + escAttr(item.folder_path) + '\')">建档</button>' +
+        '</div>' +
       '</div>';
     });
     html += '</div>';
@@ -867,6 +924,8 @@ function openArchiveAssistant(dirPath) {
   document.getElementById('scrapedTags').innerHTML = '';
   document.getElementById('archiveCoverDrop').innerHTML = '拖入主封面';
   document.getElementById('archiveMsg').innerHTML = '';
+  document.getElementById('archiveJsonPaste').value = '';
+  document.getElementById('jsonPasteMsg').innerHTML = '';
   showPage('page-archive');
   setupArchiveDropZones();
   if (dirPath) loadArchiveDraft();
@@ -882,6 +941,10 @@ async function loadArchiveDraft() {
     document.getElementById('archiveTitle').value = draft.title || '';
     document.getElementById('archiveStudio').value = draft.studio || '';
     document.getElementById('archiveSynopsis').value = draft.synopsis || '';
+    var characters = draft.characters || {};
+    document.getElementById('archiveCharacters').value = Object.keys(characters).sort(function(a, b){
+      return Number(a) - Number(b);
+    }).map(function(key){ return characters[key]; }).filter(Boolean).join('\n');
     if (draft.cover_path) {
       await loadCovers([draft.cover_path]);
       renderCoverDrop(coverUrl(draft.cover_path));
@@ -964,7 +1027,7 @@ function bindDropZone(el, onFile) {
 }
 
 function splitTags(value) {
-  return String(value || '').split(/[,，、]/).map(function(s){ return s.trim(); }).filter(Boolean);
+  return String(value || '').split(/[,，、;；]/).map(function(s){ return s.trim(); }).filter(Boolean);
 }
 
 function collectArchiveInput() {
@@ -1012,6 +1075,26 @@ async function saveArchive(shouldImport) {
     showArchiveMsg('info', shouldImport ? '已保存并导入: ' + outPath : '已保存: ' + outPath);
   } catch(e) {
     showArchiveMsg('err', '保存失败: ' + (e.message || e));
+  }
+}
+
+async function savePastedArchiveJson() {
+  var dirPath = document.getElementById('archiveDir').value.trim();
+  var jsonText = document.getElementById('archiveJsonPaste').value.trim();
+  if (!dirPath) { showJsonPasteMsg('err', '请先填写作品目录'); return; }
+  if (!jsonText) { showJsonPasteMsg('err', '请先粘贴 meta.json'); return; }
+  try {
+    JSON.parse(jsonText);
+  } catch(e) {
+    showJsonPasteMsg('err', 'JSON 格式错误: ' + e.message);
+    return;
+  }
+  try {
+    var outPath = await invoke('save_archive_json', { dirPath: dirPath, jsonText: jsonText });
+    showJsonPasteMsg('info', '已保存: ' + outPath);
+    await loadArchiveDraft();
+  } catch(e) {
+    showJsonPasteMsg('err', '保存失败: ' + (e.message || e));
   }
 }
 
