@@ -56,6 +56,80 @@ pub struct WorkDetail {
     pub tags: Vec<Tag>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct ArchiveEpisodeTags {
+    pub theme: Vec<String>,
+    pub attribute: Vec<String>,
+    pub scene: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ArchiveEpisodeDraft {
+    pub id: i32,
+    pub subtitle: String,
+    pub release_date: String,
+    pub video_path: String,
+    pub cover_path: Option<String>,
+    pub tags: ArchiveEpisodeTags,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ArchiveDraft {
+    pub dir_path: String,
+    pub title: String,
+    pub episodes: i32,
+    pub studio: String,
+    pub synopsis: String,
+    pub characters: std::collections::HashMap<String, String>,
+    pub episode_list: Vec<ArchiveEpisodeDraft>,
+    pub cover_path: Option<String>,
+    pub getchu_url: String,
+    pub hanime_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ArchiveSaveInput {
+    pub dir_path: String,
+    pub title: String,
+    pub studio: String,
+    pub synopsis: String,
+    pub characters: std::collections::HashMap<String, String>,
+    pub episode_list: Vec<ArchiveEpisodeDraft>,
+    pub cover_data: Option<String>,
+    pub cover_url: Option<String>,
+    pub getchu_url: Option<String>,
+    pub hanime_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EpisodeCoverInput {
+    pub id: i32,
+    pub image_data: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ArchiveEpisodeCoverSaveInput {
+    pub dir_path: String,
+    pub covers: Vec<EpisodeCoverInput>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ImageCandidate {
+    pub source: String,
+    pub url: String,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct ArchiveScrapeResult {
+    pub title: Option<String>,
+    pub release_date: Option<String>,
+    pub studio: Option<String>,
+    pub synopsis: Option<String>,
+    pub cover_candidates: Vec<ImageCandidate>,
+    pub raw_tags: Vec<String>,
+    pub tags: ArchiveEpisodeTags,
+}
+
 // ─── Test Set Format Import ───────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -335,6 +409,361 @@ fn write_work_json(work_id: i64, db: State<Database>) -> Result<String, String> 
     let out_path = data_dir.join("meta.json");
     std::fs::write(&out_path, &json_str).map_err(|e| e.to_string())?;
     Ok(out_path.to_string_lossy().to_string())
+}
+
+fn is_video_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|s| matches!(s.to_lowercase().as_str(), "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"))
+        .unwrap_or(false)
+}
+
+fn find_existing_cover(data_dir: &std::path::Path, stem: &str) -> Option<String> {
+    for ext in ["jpg", "png", "jpeg", "webp"] {
+        let p = data_dir.join(format!("{}.{}", stem, ext));
+        if p.exists() {
+            return Some(p.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+fn image_ext_from_data(data: &[u8]) -> &'static str {
+    if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" {
+        "jpg"
+    } else if data.len() > 4 && &data[0..4] == b"\x89PNG" {
+        "png"
+    } else if data.len() > 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
+        "webp"
+    } else {
+        "jpg"
+    }
+}
+
+fn decode_data_url(input: &str) -> Vec<u8> {
+    let data = if input.contains(";base64,") {
+        let idx = input.find(";base64,").unwrap_or(0) + 8;
+        &input[idx..]
+    } else {
+        input
+    };
+    base64_decode(data)
+}
+
+fn write_image_data(data_dir: &std::path::Path, stem: &str, image_data: &str) -> Result<String, String> {
+    let data = decode_data_url(image_data);
+    if data.is_empty() {
+        return Err("图片数据为空或无法解码".to_string());
+    }
+    std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
+    let ext = image_ext_from_data(&data);
+    let out_path = data_dir.join(format!("{}.{}", stem, ext));
+    std::fs::write(&out_path, data).map_err(|e| e.to_string())?;
+    Ok(out_path.to_string_lossy().to_string())
+}
+
+fn make_archive_draft(dir_path: &str, title_override: Option<String>) -> Result<ArchiveDraft, String> {
+    let path = std::path::Path::new(dir_path);
+    if !path.is_dir() {
+        return Err("不是目录".to_string());
+    }
+    let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let data_dir = path.join("data");
+
+    let mut videos: Vec<_> = std::fs::read_dir(path)
+        .map_err(|e| e.to_string())?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && is_video_file(p))
+        .collect();
+    videos.sort();
+
+    let episode_list = videos.iter().enumerate().map(|(i, video)| {
+        let id = (i + 1) as i32;
+        let subtitle = video.file_stem().and_then(|n| n.to_str()).unwrap_or("")
+            .trim()
+            .to_string();
+        ArchiveEpisodeDraft {
+            id,
+            subtitle,
+            release_date: String::new(),
+            video_path: video.to_string_lossy().to_string(),
+            cover_path: find_existing_cover(&data_dir, &format!("cover_ep{}", id)),
+            tags: ArchiveEpisodeTags::default(),
+        }
+    }).collect::<Vec<_>>();
+
+    Ok(ArchiveDraft {
+        dir_path: dir_path.to_string(),
+        title: title_override.filter(|s| !s.trim().is_empty()).unwrap_or(dir_name),
+        episodes: episode_list.len() as i32,
+        studio: String::new(),
+        synopsis: String::new(),
+        characters: std::collections::HashMap::new(),
+        episode_list,
+        cover_path: find_existing_cover(&data_dir, "cover"),
+        getchu_url: String::new(),
+        hanime_url: String::new(),
+    })
+}
+
+#[tauri::command]
+fn inspect_archive_folder(dir_path: String, title: Option<String>) -> Result<ArchiveDraft, String> {
+    make_archive_draft(&dir_path, title)
+}
+
+#[tauri::command]
+fn save_archive_episode_covers(input: ArchiveEpisodeCoverSaveInput) -> Result<Vec<String>, String> {
+    let data_dir = std::path::Path::new(&input.dir_path).join("data");
+    let mut saved = Vec::new();
+    for cover in &input.covers {
+        saved.push(write_image_data(&data_dir, &format!("cover_ep{}", cover.id), &cover.image_data)?);
+    }
+    Ok(saved)
+}
+
+#[tauri::command]
+fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
+    let path = std::path::Path::new(&input.dir_path);
+    if !path.is_dir() {
+        return Err("不是目录".to_string());
+    }
+    let data_dir = path.join("data");
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+
+    if let Some(ref cover_data) = input.cover_data {
+        write_image_data(&data_dir, "cover", cover_data)?;
+    } else if let Some(ref cover_url) = input.cover_url {
+        if !cover_url.trim().is_empty() {
+            let data = fetch_binary(cover_url)?;
+            let ext = image_ext_from_data(&data);
+            std::fs::write(data_dir.join(format!("cover.{}", ext)), data).map_err(|e| e.to_string())?;
+        }
+    }
+
+    let episodes_json: Vec<serde_json::Value> = input.episode_list.iter().map(|ep| {
+        serde_json::json!({
+            "id": ep.id,
+            "subtitle": ep.subtitle,
+            "release_date": ep.release_date,
+            "tags": {
+                "theme": ep.tags.theme,
+                "attribute": ep.tags.attribute,
+                "scene": ep.tags.scene,
+            }
+        })
+    }).collect();
+
+    let json = serde_json::json!({
+        "title": input.title,
+        "episodes": input.episode_list.len(),
+        "studio": input.studio,
+        "synopsis": input.synopsis,
+        "characters": input.characters,
+        "source": {
+            "getchu": input.getchu_url.unwrap_or_default(),
+            "hanime1": input.hanime_url.unwrap_or_default(),
+        },
+        "episode_list": episodes_json,
+    });
+
+    let out_path = data_dir.join("meta.json");
+    let json_str = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    std::fs::write(&out_path, json_str).map_err(|e| e.to_string())?;
+    Ok(out_path.to_string_lossy().to_string())
+}
+
+fn absolutize_url(base: &str, url: &str) -> String {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        return url.to_string();
+    }
+    if url.starts_with("//") {
+        return format!("https:{}", url);
+    }
+    if url.starts_with('/') {
+        if let Ok(parsed) = reqwest::Url::parse(base) {
+            return format!("{}://{}{}", parsed.scheme(), parsed.host_str().unwrap_or(""), url);
+        }
+    }
+    reqwest::Url::parse(base)
+        .and_then(|b| b.join(url))
+        .map(|u| u.to_string())
+        .unwrap_or_else(|_| url.to_string())
+}
+
+fn fetch_binary(url: &str) -> Result<Vec<u8>, String> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 HAnimeManager/1.0")
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.get(url).send().map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("请求失败: {}", resp.status()));
+    }
+    resp.bytes().map(|b| b.to_vec()).map_err(|e| e.to_string())
+}
+
+fn fetch_html(url: &str) -> Result<String, String> {
+    let bytes = fetch_binary(url)?;
+    if let Ok(text) = String::from_utf8(bytes.clone()) {
+        return Ok(text);
+    }
+    let (decoded, _, had_errors) = encoding_rs::SHIFT_JIS.decode(&bytes);
+    let sjis = decoded.to_string();
+    if !had_errors && sjis.contains("<") {
+        return Ok(sjis);
+    }
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+fn selector_text(doc: &scraper::Html, selector: &str) -> Option<String> {
+    let sel = scraper::Selector::parse(selector).ok()?;
+    doc.select(&sel).next().map(|el| el.text().collect::<Vec<_>>().join(" ").trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn selector_attr(doc: &scraper::Html, selector: &str, attr: &str) -> Option<String> {
+    let sel = scraper::Selector::parse(selector).ok()?;
+    doc.select(&sel).next().and_then(|el| el.value().attr(attr)).map(|s| s.to_string())
+}
+
+fn push_image_candidate(out: &mut Vec<ImageCandidate>, source: &str, base: &str, url: Option<String>) {
+    if let Some(url) = url {
+        let u = absolutize_url(base, url.trim());
+        if !u.is_empty() && !out.iter().any(|c| c.url == u) {
+            out.push(ImageCandidate { source: source.to_string(), url: u });
+        }
+    }
+}
+
+fn clean_hanime_tag(tag: &str) -> Option<String> {
+    let t = tag.trim().trim_matches('#').to_string();
+    if t.is_empty() { return None; }
+    let lower = t.to_lowercase();
+    let blocked = [
+        "1080p", "720p", "4k", "60fps", "中文字幕", "中文", "繁體中文", "字幕", "無碼", "无码",
+        "uncensored", "hd", "fhd", "痴漢", "痴汉", "大屌", "巨根", "男", "大叔", "肥宅", "正太",
+    ];
+    if blocked.iter().any(|b| lower.contains(&b.to_lowercase())) {
+        return None;
+    }
+    Some(t)
+}
+
+fn categorize_tags(tags: &[String]) -> ArchiveEpisodeTags {
+    let mut result = ArchiveEpisodeTags::default();
+    for tag in tags {
+        let lower = tag.to_lowercase();
+        let target = if ["學校", "学校", "教室", "校園", "校园", "公眾", "公众", "溫泉", "温泉", "職場", "办公室", "體操服", "泳裝", "泳装"]
+            .iter().any(|k| lower.contains(&k.to_lowercase())) {
+            &mut result.scene
+        } else if ["巨乳", "貧乳", "贫乳", "黑絲", "黑丝", "眼鏡", "眼镜", "人妻", "jk", "蘿莉", "萝莉", "妹", "白虎"]
+            .iter().any(|k| lower.contains(&k.to_lowercase())) {
+            &mut result.attribute
+        } else {
+            &mut result.theme
+        };
+        if !target.iter().any(|t| t == tag) {
+            target.push(tag.clone());
+        }
+    }
+    result
+}
+
+fn scrape_page(url: &str, source: &str) -> Result<ArchiveScrapeResult, String> {
+    let html = fetch_html(url)?;
+    let doc = scraper::Html::parse_document(&html);
+    let mut result = ArchiveScrapeResult::default();
+
+    result.title = selector_attr(&doc, "meta[property='og:title']", "content")
+        .or_else(|| selector_text(&doc, "h1"))
+        .or_else(|| selector_text(&doc, "title"))
+        .map(|s| s.replace(" - Getchu.com", "").replace(" | Hanime1.me", "").trim().to_string());
+
+    result.synopsis = selector_attr(&doc, "meta[name='description']", "content")
+        .or_else(|| selector_attr(&doc, "meta[property='og:description']", "content"));
+
+    push_image_candidate(&mut result.cover_candidates, source, url, selector_attr(&doc, "meta[property='og:image']", "content"));
+    push_image_candidate(&mut result.cover_candidates, source, url, selector_attr(&doc, "meta[name='twitter:image']", "content"));
+    push_image_candidate(&mut result.cover_candidates, source, url, selector_attr(&doc, "link[rel='image_src']", "href"));
+
+    if let Ok(sel) = scraper::Selector::parse("img") {
+        for img in doc.select(&sel).take(20) {
+            if let Some(src) = img.value().attr("src") {
+                let lower = src.to_lowercase();
+                if lower.contains("cover") || lower.contains("package") || lower.contains("img") || source == "hanime1" {
+                    push_image_candidate(&mut result.cover_candidates, source, url, Some(src.to_string()));
+                }
+            }
+        }
+    }
+
+    if source == "hanime1" {
+        if let Ok(sel) = scraper::Selector::parse("a") {
+            for a in doc.select(&sel) {
+                let href = a.value().attr("href").unwrap_or("").to_lowercase();
+                let text = a.text().collect::<Vec<_>>().join("").trim().to_string();
+                if (href.contains("tag") || href.contains("search") || href.contains("genre")) && !text.is_empty() {
+                    if let Some(tag) = clean_hanime_tag(&text) {
+                        if !result.raw_tags.iter().any(|t| t == &tag) {
+                            result.raw_tags.push(tag);
+                        }
+                    }
+                }
+            }
+        }
+        if result.raw_tags.is_empty() {
+            if let Some(keywords) = selector_attr(&doc, "meta[name='keywords']", "content") {
+                for item in keywords.split(',') {
+                    if let Some(tag) = clean_hanime_tag(item) {
+                        if !result.raw_tags.iter().any(|t| t == &tag) {
+                            result.raw_tags.push(tag);
+                        }
+                    }
+                }
+            }
+        }
+        result.tags = categorize_tags(&result.raw_tags);
+    }
+
+    if source == "getchu" {
+        let text = doc.root_element().text().collect::<Vec<_>>().join("\n");
+        for line in text.lines().map(|l| l.trim()).filter(|l| !l.is_empty()) {
+            if result.release_date.is_none() && (line.contains("発売日") || line.contains("発売予定")) {
+                result.release_date = Some(line.replace("発売日", "").replace("発売予定", "").trim().to_string());
+            }
+            if result.studio.is_none() && (line.contains("ブランド") || line.contains("メーカー")) {
+                result.studio = Some(line.replace("ブランド", "").replace("メーカー", "").trim().to_string());
+            }
+        }
+    }
+
+    Ok(result)
+}
+
+#[tauri::command]
+fn scrape_archive_sources(getchu_url: Option<String>, hanime_url: Option<String>) -> Result<ArchiveScrapeResult, String> {
+    let mut merged = ArchiveScrapeResult::default();
+    if let Some(url) = getchu_url.filter(|u| !u.trim().is_empty()) {
+        if let Ok(getchu) = scrape_page(&url, "getchu") {
+            merged.title = getchu.title;
+            merged.release_date = getchu.release_date;
+            merged.studio = getchu.studio;
+            merged.synopsis = getchu.synopsis;
+            merged.cover_candidates.extend(getchu.cover_candidates);
+        }
+    }
+    if let Some(url) = hanime_url.filter(|u| !u.trim().is_empty()) {
+        if let Ok(hanime) = scrape_page(&url, "hanime1") {
+            if merged.title.is_none() { merged.title = hanime.title; }
+            if merged.synopsis.is_none() { merged.synopsis = hanime.synopsis; }
+            merged.cover_candidates.extend(hanime.cover_candidates);
+            merged.raw_tags = hanime.raw_tags;
+            merged.tags = hanime.tags;
+        }
+    }
+    Ok(merged)
 }
 
 // ─── Database ──────────────────────────────────────────────
@@ -1191,6 +1620,10 @@ pub fn run() {
             load_cover_cache,
             generate_thumbnail,
             import_work_via_json,
+            inspect_archive_folder,
+            save_archive_draft,
+            save_archive_episode_covers,
+            scrape_archive_sources,
             get_work_meta,
             update_work_meta,
             write_work_json,
