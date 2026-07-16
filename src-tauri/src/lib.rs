@@ -11,7 +11,7 @@ use windows_sys::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, MoveWindow, SetWindowPos, ShowWindow, HWND_TOP, SWP_NOACTIVATE,
-    SWP_SHOWWINDOW, SW_SHOW, WS_CHILD, WS_CLIPSIBLINGS, WS_VISIBLE,
+    SWP_SHOWWINDOW, SW_HIDE, WS_CHILD, WS_CLIPSIBLINGS,
 };
 
 // ─── Data Models ──────────────────────────────────────────
@@ -2370,11 +2370,11 @@ fn create_mpv_host(parent_hwnd: HWND) -> Result<HWND, String> {
             0,
             class_name.as_ptr(),
             title.as_ptr(),
-            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+            WS_CHILD | WS_CLIPSIBLINGS,
             0,
             0,
-            100,
-            100,
+            1,
+            1,
             parent_hwnd,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
@@ -2385,16 +2385,7 @@ fn create_mpv_host(parent_hwnd: HWND) -> Result<HWND, String> {
         Err("创建 mpv 承载窗口失败".to_string())
     } else {
         unsafe {
-            ShowWindow(hwnd, SW_SHOW);
-            SetWindowPos(
-                hwnd,
-                HWND_TOP,
-                0,
-                0,
-                100,
-                100,
-                SWP_SHOWWINDOW | SWP_NOACTIVATE,
-            );
+            ShowWindow(hwnd, SW_HIDE);
         }
         Ok(hwnd)
     }
@@ -2435,6 +2426,29 @@ fn mpv_get_duration(pipe_name: &str) -> Result<f64, String> {
         serde_json::json!({"command":["get_property","duration"]}),
     )?;
     Ok(response.get("data").and_then(|v| v.as_f64()).unwrap_or(0.0))
+}
+
+fn wait_for_mpv_ipc(pipe_name: &str, child: &mut std::process::Child) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(5);
+    let mut last_error = String::new();
+    while started.elapsed() < timeout {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|e| format!("检查 mpv 进程失败: {}", e))?
+        {
+            return Err(format!("mpv 已退出: {}", status));
+        }
+        match mpv_ipc_command(
+            pipe_name,
+            serde_json::json!({"command":["get_property","mpv-version"]}),
+        ) {
+            Ok(_) => return Ok(()),
+            Err(err) => last_error = err,
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    Err(format!("连接 mpv IPC 超时: {}", last_error))
 }
 
 #[cfg(target_os = "windows")]
@@ -2478,7 +2492,7 @@ fn start_embedded_mpv(
 
     let host_hwnd = create_mpv_host(parent_hwnd)?;
     let pipe_name = format!(r"\\.\pipe\hanime_mpv_{}_{}", std::process::id(), episode_id);
-    let child = std::process::Command::new(&mpv)
+    let mut child = match std::process::Command::new(&mpv)
         .arg(format!("--wid={}", host_hwnd as isize))
         .arg(format!("--input-ipc-server={}", pipe_name))
         .arg("--force-window=yes")
@@ -2492,7 +2506,24 @@ fn start_embedded_mpv(
         .arg(&video_path)
         .creation_flags(0x08000000)
         .spawn()
-        .map_err(|e| format!("启动 mpv 失败: {}", e))?;
+    {
+        Ok(child) => child,
+        Err(err) => {
+            unsafe {
+                DestroyWindow(host_hwnd);
+            }
+            return Err(format!("启动 mpv 失败: {}", err));
+        }
+    };
+
+    if let Err(err) = wait_for_mpv_ipc(&pipe_name, &mut child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        unsafe {
+            DestroyWindow(host_hwnd);
+        }
+        return Err(err);
+    }
 
     state.host_hwnd = host_hwnd as isize;
     state.child = Some(child);
