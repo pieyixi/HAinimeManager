@@ -160,6 +160,7 @@
   .archive-textarea{min-height:92px;resize:vertical;padding:8px 10px;line-height:1.6}
   .archive-input:focus,.archive-textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,0.10)}
   .archive-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+  .archive-inline-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
   .json-paste{min-height:210px;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;line-height:1.55}
   .drop-zone{border:1px dashed #c5ccd7;border-radius:10px;background:#f8fafc;min-height:180px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:13px;overflow:hidden;cursor:pointer}
   .drop-zone.small{width:112px;height:63px;min-height:63px;border-radius:7px;flex-shrink:0}
@@ -305,8 +306,6 @@
           <div class="player-row">
             <button class="btn-secondary" id="muteBtn" onclick="toggleMute()">静音</button>
             <input class="volume-range" id="playerVolume" type="range" min="0" max="100" step="1" value="80" oninput="setPlayerVolume(this.value)">
-            <button class="btn-secondary" onclick="captureCurrentFrame('episode')">设为本集封面</button>
-            <button class="btn-secondary" onclick="captureCurrentFrame('work')">设为主封面</button>
             <span class="player-msg" id="playerMsg"></span>
           </div>
         </div>
@@ -389,6 +388,10 @@
           <div style="height:18px"></div>
           <div class="archive-section-title">主封面</div>
           <div class="drop-zone" id="archiveCoverDrop">拖入主封面</div>
+          <div class="archive-inline-actions">
+            <button class="btn-secondary" onclick="playArchiveEpisodeForCover(1)">播放第1集取帧</button>
+            <button class="btn-secondary" onclick="setArchiveCoverFromLastFrame()">当前帧设为主封面</button>
+          </div>
 
           <div style="height:18px"></div>
           <div class="archive-section-title">直接粘贴 meta.json</div>
@@ -483,11 +486,13 @@ var state = {
     duration: 0,
     libmpvReady: false,
     muted: false,
+    mode: 'detail',
   },
   archive: {
     draft: null,
     coverData: null,
     episodeCoverData: {},
+    lastFrame: null,
   },
 };
 
@@ -908,6 +913,7 @@ function playerMessage(kind, text) {
 }
 
 function currentPlayerEpisode() {
+  if (state.player.mode === 'archive') return state.player.episode;
   if (!state.currentDetail || !state.player.episode) return null;
   return (state.currentDetail.episodes || []).find(function(e){ return e.id === state.player.episode.id; }) || state.player.episode;
 }
@@ -1022,13 +1028,11 @@ function delay(ms) {
   return new Promise(function(resolve){ setTimeout(resolve, ms); });
 }
 
-async function openPlayer(episodeId) {
-  var detail = state.currentDetail;
-  if (!detail) return;
-  var ep = (detail.episodes || []).find(function(item){ return item.id === episodeId; });
+async function openPlayerWithEpisode(ep, title, mode) {
   if (!ep) return;
   state.player.episode = ep;
-  document.getElementById('playerTitle').textContent = detail.work.title + ' / 第' + ep.number + '集';
+  state.player.mode = mode || 'detail';
+  document.getElementById('playerTitle').textContent = title;
   document.getElementById('mpvHint').textContent = '正在启动 mpv 播放窗口...';
   playerMessage('info', '正在启动 mpv 播放内核...');
   showPage('page-player');
@@ -1059,16 +1063,34 @@ async function openPlayer(episodeId) {
   }
 }
 
+async function openPlayer(episodeId) {
+  var detail = state.currentDetail;
+  if (!detail) return;
+  var ep = (detail.episodes || []).find(function(item){ return item.id === episodeId; });
+  await openPlayerWithEpisode(ep, detail.work.title + ' / 第' + ep.number + '集', 'detail');
+}
+
 async function returnFromPlayer() {
   stopPlayerTimer();
+  var ep = currentPlayerEpisode();
+  var mode = state.player.mode;
+  if (mode === 'archive' && ep) {
+    await pollMpvStatus();
+    state.archive.lastFrame = {
+      videoPath: ep.video_path,
+      episodeId: ep.id || ep.number || null,
+      time: Number(state.player.currentTime) || 0,
+    };
+  }
   try { await mpvPlugin('destroy', { windowLabel: 'main' }); } catch(e) {}
   state.player.libmpvReady = false;
   state.player.currentTime = 0;
   state.player.duration = 0;
   state.player.muted = false;
+  state.player.mode = 'detail';
   updatePlayerControls();
   updateMuteControls();
-  showPage('page-detail');
+  showPage(mode === 'archive' ? 'page-archive' : 'page-detail');
 }
 
 async function togglePlayerPlay() {
@@ -1281,7 +1303,7 @@ async function loadUnarchivedFolders() {
 }
 
 function openArchiveAssistant(dirPath) {
-  state.archive = { draft: null, coverData: null, episodeCoverData: {} };
+  state.archive = { draft: null, coverData: null, episodeCoverData: {}, lastFrame: null };
   document.getElementById('archiveDir').value = dirPath || '';
   document.getElementById('archiveOfficialTitle').value = '';
   document.getElementById('archiveTitle').value = '';
@@ -1348,7 +1370,8 @@ function renderArchiveEpisodes() {
       preview = '拖入第' + ep.id + '集封面';
     }
     return '<div class="episode-editor" data-ep="' + ep.id + '">' +
-      '<div class="drop-zone small" data-episode-drop="' + ep.id + '">' + preview + '</div>' +
+      '<div><div class="drop-zone small" data-episode-drop="' + ep.id + '">' + preview + '</div>' +
+      '<div class="archive-inline-actions"><button class="btn-secondary" onclick="playArchiveEpisodeForCover(' + ep.id + ')">播放取帧</button><button class="btn-secondary" onclick="setArchiveEpisodeCoverFromLastFrame(' + ep.id + ')">当前帧设为本集封面</button></div></div>' +
       '<div class="episode-editor-main">' +
         '<div><div class="archive-label">第' + ep.id + '集官方副标题（可空）</div><input class="archive-input" data-ep-field="subtitle" data-index="' + index + '" value="' + escHtml(ep.subtitle || '') + '"></div>' +
         '<div><div class="archive-label">发售时间</div><input class="archive-input" data-ep-field="release_date" data-index="' + index + '" value="' + escHtml(ep.release_date || '') + '" placeholder="YYYY-MM"></div>' +
@@ -1381,6 +1404,64 @@ function setupArchiveDropZones() {
       zone.innerHTML = '<img src="' + state.archive.episodeCoverData[epId] + '">';
     });
   });
+}
+
+function archiveEpisodeById(epId) {
+  var draft = state.archive.draft;
+  if (!draft) return null;
+  return (draft.episode_list || []).find(function(ep){ return Number(ep.id) === Number(epId); });
+}
+
+async function playArchiveEpisodeForCover(epId) {
+  var ep = archiveEpisodeById(epId);
+  if (!ep) { showArchiveMsg('err', '请先读取目录'); return; }
+  await openPlayerWithEpisode({
+    id: ep.id,
+    number: ep.id,
+    video_path: ep.video_path,
+  }, (state.archive.draft.title || '建档') + ' / 第' + ep.id + '集取帧', 'archive');
+}
+
+async function captureArchiveFrameToData(videoPath, time) {
+  var result = await invoke('capture_archive_frame_data', { videoPath: videoPath, timeSeconds: time });
+  return result.image_data;
+}
+
+function archiveLastFrameFor(epId) {
+  var last = state.archive.lastFrame;
+  if (!last) {
+    showArchiveMsg('err', '请先从建档页播放视频，拖到要截取的位置后返回');
+    return null;
+  }
+  if (epId && Number(last.episodeId) !== Number(epId)) {
+    showArchiveMsg('err', '当前记录的是第' + last.episodeId + '集，请先播放第' + epId + '集取帧');
+    return null;
+  }
+  return last;
+}
+
+async function setArchiveCoverFromLastFrame() {
+  var last = archiveLastFrameFor(null);
+  if (!last) return;
+  try {
+    state.archive.coverData = await captureArchiveFrameToData(last.videoPath, last.time);
+    renderCoverDrop(state.archive.coverData);
+    showArchiveMsg('info', '已用 ' + formatTime(last.time) + ' 设为主封面预览，保存后写入 data');
+  } catch(e) {
+    showArchiveMsg('err', '截主封面失败: ' + (e.message || e));
+  }
+}
+
+async function setArchiveEpisodeCoverFromLastFrame(epId) {
+  var last = archiveLastFrameFor(epId);
+  if (!last) return;
+  try {
+    state.archive.episodeCoverData[String(epId)] = await captureArchiveFrameToData(last.videoPath, last.time);
+    renderArchiveEpisodes();
+    showArchiveMsg('info', '已用 ' + formatTime(last.time) + ' 设为第' + epId + '集封面预览，保存后写入 data');
+  } catch(e) {
+    showArchiveMsg('err', '截本集封面失败: ' + (e.message || e));
+  }
 }
 
 function bindDropZone(el, onFile) {

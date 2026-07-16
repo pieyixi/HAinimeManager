@@ -135,6 +135,11 @@ pub struct CapturedCover {
 }
 
 #[derive(Debug, Serialize)]
+pub struct CapturedFrameData {
+    pub image_data: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ImageCandidate {
     pub source: String,
     pub url: String,
@@ -2387,6 +2392,57 @@ fn capture_video_cover(
 }
 
 #[tauri::command]
+fn capture_archive_frame_data(
+    video_path: String,
+    time_seconds: f64,
+) -> Result<CapturedFrameData, String> {
+    use base64::Engine as _;
+    if !time_seconds.is_finite() || time_seconds < 0.0 {
+        return Err("截帧时间无效".to_string());
+    }
+    if !std::path::Path::new(&video_path).is_file() {
+        return Err("视频文件不存在".to_string());
+    }
+    let temp_path = std::env::temp_dir().join(format!(
+        "hanime_archive_frame_{}_{}.jpg",
+        std::process::id(),
+        chrono_like_millis()
+    ));
+    let status = std::process::Command::new(ffmpeg_path())
+        .arg("-y")
+        .arg("-ss")
+        .arg(format!("{:.3}", time_seconds))
+        .arg("-i")
+        .arg(&video_path)
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-q:v")
+        .arg("2")
+        .arg(&temp_path)
+        .status()
+        .map_err(|e| format!("启动 ffmpeg 失败: {}", e))?;
+    if !status.success() || !temp_path.exists() {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err("ffmpeg 截帧失败".to_string());
+    }
+    let data = std::fs::read(&temp_path).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&temp_path);
+    Ok(CapturedFrameData {
+        image_data: format!(
+            "data:image/jpeg;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(data)
+        ),
+    })
+}
+
+fn chrono_like_millis() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
+#[tauri::command]
 fn play_video(video_path: String) -> Result<(), String> {
     let player = std::env::var("POTPLAYER_PATH").unwrap_or_else(|_| {
         let paths = [
@@ -2658,6 +2714,7 @@ pub fn run() {
             update_work_cover,
             update_episode_cover,
             capture_video_cover,
+            capture_archive_frame_data,
             backup_database,
             restore_database,
             load_cover_cache,
