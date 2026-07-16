@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicedoc/schema@latest/tauri-conf.schema.json",
+  "productName": "HAnimeManager",
+  "version": "1.0.0",
+  "identifier": "com.hanime.manager",
+  "build": {
+    "frontendDist": "../src",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "本地里番管理器",
+        "width": 1360,
+        "height": 900,
+        "resizable": true
+      }
+    ]
+  },
+  "bundle": {
+    "icon": ["icons/icon.png"]
+  }
+}

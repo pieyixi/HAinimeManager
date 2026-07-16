@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本地里番管理器</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{--bg:#f6f7f9;--panel:#fff;--line:#e6e9ef;--line-strong:#cfd5dd;--text:#171a1f;--muted:#6f7782;--soft:#98a1ad;--primary:#2563eb;--primary-soft:#eff5ff;--danger:#c93535;--danger-soft:#fff1f1}
+  html,body{width:100%;height:100%;overflow:hidden}
+  body{font-family:"Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+  .window{width:100vw;height:100vh;background:var(--bg);overflow:hidden;display:flex;flex-direction:column}
+  .page{display:none;flex:1;min-height:0}
+  .page.active{display:flex;min-height:0;flex:1;overflow:auto}
+  .home{min-height:100%;width:100%;display:flex;flex-direction:column}
+  .search-row{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:minmax(120px,1fr) minmax(420px,720px) minmax(120px,1fr);align-items:center;gap:18px;padding:18px 32px 10px;background:rgba(246,247,249,0.96);backdrop-filter:blur(12px)}
+  .toolbar-spacer{min-width:0}
+  .search-box{position:relative;width:100%}
+  .search-box input{width:100%;height:42px;border:1px solid #d9dee7;border-radius:999px;padding:0 96px 0 42px;font-size:14px;background:var(--panel);outline:none;font-family:inherit;color:var(--text);box-shadow:0 1px 2px rgba(15,23,42,0.04)}
+  .search-box input:focus{border-color:#9db7f5;box-shadow:0 0 0 4px rgba(37,99,235,0.10),0 8px 24px rgba(15,23,42,0.08)}
+  .search-box input::placeholder{color:#a0a7b1}
+  .search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:#9aa3ad;font-size:14px}
+  .search-result-count{position:absolute;right:50px;top:50%;transform:translateY(-50%);font-size:12px;color:#9aa3ad;pointer-events:none}
+  .search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#a0a7b1;font-size:12px;cursor:pointer;font-family:inherit;display:none}
+  .search-clear.visible{display:block}
+  .search-clear:hover{color:#4b5563}
+  .header-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+  .btn-icon{height:34px;padding:0 12px;border:1px solid var(--line);background:rgba(255,255,255,0.72);border-radius:999px;cursor:pointer;font-size:12px;color:#4b5563;display:flex;align-items:center;justify-content:center;gap:6px;font-family:inherit}
+  .btn-icon:hover{background:#fff;border-color:#cfd5dd;box-shadow:0 2px 8px rgba(15,23,42,0.05)}
+
+  .filter-row{display:flex;gap:4px;padding:6px 32px 22px;flex-wrap:wrap;position:relative;background:var(--bg);justify-content:center}
+  .filter-sep{width:10px;height:1px}
+  .filter-btn{height:32px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:rgba(255,255,255,0.78);cursor:pointer;font-size:12px;color:#394150;display:flex;align-items:center;gap:5px;user-select:none;font-family:inherit;transition:border-color .12s,background .12s,color .12s,box-shadow .12s}
+  .filter-btn:hover{border-color:#c9d1dd;background:#fff;box-shadow:0 2px 8px rgba(15,23,42,0.05)}
+  .filter-btn.active{border-color:#a9c3ff;color:#1d4ed8;background:var(--primary-soft)}
+  .filter-btn .arrow{font-size:9px;color:#8a94a3}
+
+  .filter-dd{position:fixed;max-height:320px;overflow-y:auto;background:rgba(255,255,255,0.98);border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 48px rgba(15,23,42,0.16);padding:10px;z-index:9999;backdrop-filter:blur(12px)}
+  .filter-dd .dd-header{padding:0 4px 8px;border-bottom:1px solid var(--line);margin-bottom:8px;font-size:11px;font-weight:650;color:var(--muted)}
+  .filter-dd .dd-body{padding:0;display:flex;gap:6px}
+  .filter-dd .dd-body.col{flex-direction:column;flex-wrap:nowrap}
+  .filter-dd .dd-body.row{flex-direction:row;flex-wrap:wrap}
+  .filter-dd .dd-tag{padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:12px;cursor:pointer;background:#fff;color:#394150;user-select:none;display:inline-block}
+  .filter-dd .dd-tag.selected{border-color:var(--primary);background:var(--primary);color:#fff}
+  .filter-dd .dd-tag:hover:not(.selected){border-color:var(--line-strong);background:#f8fafc}
+  .filter-dd .dd-actions{border-top:1px solid var(--line);margin-top:10px;padding:8px 4px 0;display:flex;gap:12px}
+  .filter-dd .dd-actions span{cursor:pointer;font-size:12px;color:var(--muted)}
+  .filter-dd .dd-actions span.primary{color:var(--primary);margin-left:auto}
+
+  .cover-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:20px;align-content:start;flex:1;padding:0 32px 20px}
+  .cover-card{cursor:pointer;position:relative;border-radius:8px;min-width:0}
+  .cover-card:hover .cover-img{border-color:#c7d2fe;box-shadow:0 10px 28px rgba(15,23,42,0.12);transform:translateY(-1px)}
+  .cover-img{width:100%;aspect-ratio:3/4;background:#e9edf2;border:1px solid var(--line);border-radius:8px;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;transition:box-shadow .14s,transform .14s,border-color .14s}
+  .cover-hover{position:absolute;left:0;right:0;bottom:0;background:linear-gradient(transparent,rgba(17,24,39,0.78));color:#fff;padding:32px 12px 10px;opacity:0;pointer-events:none;transition:opacity .12s}
+  .cover-card:hover .cover-hover{opacity:1}
+  .cover-hover .ch-title{font-size:13px;font-weight:650;margin-bottom:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cover-hover .ch-meta{font-size:12px;color:rgba(255,255,255,0.82);line-height:1.45}
+  .cover-title{font-size:13px;color:#202733;margin-top:8px;line-height:1.35;text-align:center;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .cover-meta{display:none}
+
+  .pagination{display:flex;justify-content:center;align-items:center;gap:5px;padding:12px 24px 16px;flex-shrink:0;margin-top:auto;background:var(--bg);border-top:1px solid var(--line)}
+  .page-num,.page-btn{display:inline-flex;align-items:center;justify-content:center;height:28px;border:1px solid var(--line);border-radius:6px;font-size:12px;color:#4b5563;cursor:pointer;background:#fff;user-select:none}
+  .page-num{min-width:28px;padding:0 8px}
+  .page-btn{width:28px;font-size:14px}
+  .page-num:hover,.page-btn:hover{border-color:#b7c6e8;color:var(--primary)}
+  .page-num.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .page-dot{padding:0 2px;color:#9aa3ad;font-size:12px}
+
+  .detail{width:100%;padding:20px 32px 32px}
+  .detail-back{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--primary);cursor:pointer;margin-bottom:14px;padding:6px 10px;border-radius:7px}
+  .detail-back:hover{background:var(--primary-soft)}
+  .detail-layout{display:grid;grid-template-columns:320px minmax(0,760px);gap:34px;max-width:1140px;margin:0 auto;align-items:start}
+  .detail-left{width:320px;display:flex;flex-direction:column;align-items:center;gap:14px}
+  .detail-cover{width:300px;height:400px;background:#e9edf2;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:48px;color:#aab3bf;overflow:hidden;box-shadow:0 18px 50px rgba(15,23,42,0.12)}
+  .detail-right{min-width:0;display:grid;grid-template-rows:auto auto;gap:16px}
+  .detail-main{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 24px}
+  .detail-episodes{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .detail-title{font-size:26px;font-weight:700;color:#111827;margin-bottom:12px;line-height:1.25}
+  .detail-meta-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+  .detail-date,.detail-studio{font-size:12px;color:#4b5563;background:#f3f6fa;border:1px solid var(--line);border-radius:999px;padding:5px 10px;margin:0}
+  .detail-tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;align-items:center}
+  .detail-tag{padding:4px 9px;background:#f1f4f8;border:1px solid var(--line);border-radius:6px;font-size:12px;color:#4b5563}
+  .detail-section-title{font-size:11px;font-weight:700;color:#8a94a3;text-transform:uppercase;margin:4px 0 1px;width:100%}
+  .detail-desc{font-size:13px;color:#4b5563;line-height:1.8;margin:0;padding:14px 0 0;background:transparent;border:none;border-top:1px solid var(--line);border-radius:0}
+  .episodes-title{font-size:14px;font-weight:650;color:#111827;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  .episode-list{display:flex;flex-direction:column;gap:6px;max-height:360px;overflow:auto;padding-right:2px}
+  .episode-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:7px;cursor:pointer;border:1px solid transparent}
+  .episode-item:hover{background:#f8fafc;border-color:var(--line)}
+  .episode-cover{width:112px;height:63px;border-radius:6px;background:#e9edf2;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px;color:#aab3bf;overflow:hidden;position:relative}
+  .episode-info{flex:1;min-width:0}
+  .episode-num{font-size:13px;font-weight:650;color:#111827}
+  .episode-sub{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .episode-play{font-size:12px;color:var(--primary);opacity:0}
+  .episode-item:hover .episode-play{opacity:1}
+  .detail-actions{margin-top:0;display:flex;gap:10px;width:300px}
+  .detail-actions .btn-secondary{width:100%}
+  .btn-secondary{height:32px;padding:0 13px;border:1px solid var(--line-strong);border-radius:7px;background:#fff;font-size:13px;color:#374151;cursor:pointer;font-family:inherit}
+  .btn-secondary:hover{border-color:#b8c0ca;background:#f9fafb}
+
+  .settings{width:min(680px,calc(100% - 48px));padding:0;margin:auto}
+  .settings-title{font-size:22px;font-weight:700;color:#111827;margin-bottom:18px;text-align:center}
+  .settings-group{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:14px}
+  .settings-label{font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px}
+  .settings-field{display:flex;align-items:center;gap:8px}
+  .s-input{flex:1;height:34px;border:1px solid var(--line-strong);border-radius:7px;padding:0 10px;font-size:13px;background:#fff;outline:none;font-family:inherit}
+  .s-input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,0.10)}
+  .settings-divider{display:none}
+  .settings-msg{padding:9px 12px;border-radius:7px;font-size:13px;margin-top:10px;border:1px solid transparent}
+  .settings-msg.info{background:var(--primary-soft);color:#1d4ed8;border-color:#d7e5ff}
+  .settings-msg.err{background:var(--danger-soft);color:var(--danger);border-color:#ffd5d5}
+  .btn-danger{border-color:#f2b8b8;color:var(--danger)}
+  .btn-danger:hover{border-color:var(--danger);background:var(--danger-soft)}
+  .modal-mask{position:fixed;inset:0;background:rgba(15,23,42,0.32);display:none;align-items:center;justify-content:center;z-index:10000}
+  .modal-mask.active{display:flex}
+  .modal{width:min(480px,calc(100vw - 32px));background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 24px 70px rgba(15,23,42,0.24);padding:18px}
+  .modal-title{font-size:16px;font-weight:680;margin-bottom:10px}
+  .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+  .modal-copy{font-size:13px;color:#4b5563;line-height:1.7}
+  .context-menu{position:fixed;display:none;min-width:132px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 14px 36px rgba(15,23,42,0.16);padding:6px;z-index:9998}
+  .context-menu.active{display:block}
+  .context-item{width:100%;height:30px;border:none;background:transparent;border-radius:6px;text-align:left;padding:0 10px;font-size:13px;color:var(--danger);cursor:pointer;font-family:inherit}
+  .context-item:hover{background:var(--danger-soft)}
+
+  ::-webkit-scrollbar{width:6px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#c7cdd6;border-radius:4px}
+  .empty-state{text-align:center;padding:72px 20px;color:var(--muted);grid-column:1/-1}
+  .empty-state h2{font-size:18px;font-weight:650;color:#374151;margin-bottom:6px}
+  .loading{text-align:center;padding:72px 20px;color:var(--muted);grid-column:1/-1;font-size:14px}
+  @media (max-width:760px){
+    .search-row{grid-template-columns:1fr auto;gap:10px}
+    .toolbar-spacer{display:none}
+    .search-box{grid-column:1/2}
+    .detail-layout{grid-template-columns:1fr}
+    .detail-left,.detail-cover{width:100%;max-width:320px}
+  }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="page active" id="page-home">
+    <div class="home">
+      <div class="search-row">
+        <div class="toolbar-spacer"></div>
+        <div class="search-box">
+          <span class="search-icon">&#128269;</span>
+          <input type="text" placeholder="搜索标题、简介、制作商、Tag" id="searchInput" oninput="applyFilter()">
+          <span class="search-result-count" id="resultCount"></span>
+          <button class="search-clear" id="searchClear" onclick="clearSearch()">清除</button>
+        </div>
+        <div class="header-actions">
+          <button class="btn-icon" onclick="showPage('page-settings')" title="设置"><span>&#9881;</span><span>设置</span></button>
+        </div>
+      </div>
+      <div class="filter-row" id="filterRow">
+        <button class="filter-btn" data-filter="year">年份 <span class="arrow">&#9660;</span></button>
+        <button class="filter-btn" data-filter="studio">制作商 <span class="arrow">&#9660;</span></button>
+        <span class="filter-sep"></span>
+        <button class="filter-btn" data-filter="story">剧情 <span class="arrow">&#9660;</span></button>
+        <button class="filter-btn" data-filter="attr">属性 <span class="arrow">&#9660;</span></button>
+        <button class="filter-btn" data-filter="scene">场景 <span class="arrow">&#9660;</span></button>
+        <span class="filter-sep"></span>
+        <button class="filter-btn" id="sortTimeBtn" data-sort="time-desc">时间 &#11015;</button>
+        <button class="filter-btn" id="sortNameBtn" data-sort="name-asc">名称 &#11014;</button>
+      </div>
+      <div class="cover-grid" id="coverGrid">
+        <div class="loading">加载中...</div>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </div>
+  </div>
+
+  <div class="page" id="page-detail">
+    <div class="detail">
+      <div class="detail-back" onclick="showHome()">&#8592; 返回作品库</div>
+      <div class="detail-layout">
+        <div class="detail-left">
+          <div class="detail-cover" id="detailCover">&#127916;</div>
+          <div class="detail-actions">
+            <button class="btn-secondary" id="btnOpenFolder">&#128451; 打开文件夹</button>
+          </div>
+        </div>
+        <div class="detail-right">
+          <div class="detail-main">
+            <div class="detail-title" id="detailTitle"></div>
+            <div class="detail-meta-row">
+              <div class="detail-date" id="detailDate"></div>
+              <div class="detail-studio" id="detailStudio"></div>
+            </div>
+            <div class="detail-tags" id="detailTags"></div>
+            <div class="detail-desc" id="detailDesc"></div>
+          </div>
+          <div class="detail-episodes">
+            <div class="episodes-title">集数列表</div>
+            <div class="episode-list" id="episodeList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="page" id="page-settings">
+    <div class="settings">
+      <div class="detail-back" onclick="showPage('page-home')">&#8592; 返回</div>
+      <div class="settings-title">设置</div>
+      <div class="settings-group">
+        <div class="settings-label">媒体目录</div>
+        <div class="settings-field">
+          <input class="s-input" type="text" id="mediaPath" value="D:\HAnime">
+          <button class="btn-secondary" onclick="doScan()">扫描</button>
+          <button class="btn-secondary" onclick="doSync()">同步</button>
+        </div>
+        <div id="scanMsg"></div>
+        <div id="syncMsg"></div>
+      </div>
+      <div class="settings-divider"></div>
+      <div class="settings-group">
+        <div class="settings-label">数据库</div>
+        <div class="settings-field">
+          <button class="btn-secondary" onclick="doBackup()">备份</button>
+          <button class="btn-secondary" onclick="doRestore()">恢复</button>
+        </div>
+        <div style="margin-top:6px">
+          <input class="s-input" type="text" id="dbFilePath" placeholder="备份/恢复文件路径" style="width:100%">
+        </div>
+        <div id="dbMsg"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-mask" id="confirmModal">
+  <div class="modal">
+    <div class="modal-title" id="confirmTitle">确认操作</div>
+    <div class="modal-copy" id="confirmBody"></div>
+    <div class="modal-actions">
+      <button class="btn-secondary" onclick="resolveConfirm(false)">取消</button>
+      <button class="btn-secondary btn-danger" onclick="resolveConfirm(true)">删除</button>
+    </div>
+  </div>
+</div>
+<div class="context-menu" id="workContextMenu">
+  <button class="context-item" onclick="deleteContextWork()">删除作品</button>
+</div>
+
+<script>
+var invoke;
+if (window.__TAURI__ && window.__TAURI__.core) {
+  invoke = window.__TAURI__.core.invoke;
+} else if (window.__TAURI__) {
+  invoke = window.__TAURI__.invoke;
+}
+
+var state = {
+  works: [],
+  tags: [],
+  years: [],
+  studios: [],
+  coverCache: {},
+  activeFilters: {},
+  currentSort: 'time-desc',
+  currentPage: 1,
+  pageSize: 20,
+  openDropdown: null,
+  currentDetail: null,
+  scanFolders: [],
+  contextWorkId: null,
+  confirmResolver: null,
+};
+
+var CAT_MAP = { story: '剧情', attr: '属性', scene: '场景' };
+
+// ─── Page Navigation ────────────────────
+
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
+  document.getElementById(id).classList.add('active');
+}
+
+function showHome() { showPage('page-home'); }
+
+// ─── Cover Helpers ──────────────────────
+
+function coverUrl(path) {
+  if (!path) return '';
+  return state.coverCache[path] || '';
+}
+
+async function loadCovers(paths) {
+  var needed = paths.filter(function(p){return p && !state.coverCache[p]});
+  if (!needed.length) return;
+  try {
+    var result = await invoke('load_cover_cache', { coverPaths: needed });
+    result.forEach(function(pair){ state.coverCache[pair[0]] = pair[1]; });
+  } catch(e) { console.error('load covers failed:', e); }
+}
+
+// ─── Init ───────────────────────────────
+
+async function init() {
+  try {
+    var grid = document.getElementById('coverGrid');
+    grid.innerHTML = '<div class="loading">&#128269; 加载作品数据...</div>';
+
+    var results = await Promise.all([
+      invoke('get_all_works_with_tags'),
+      invoke('get_tags'),
+      invoke('get_years'),
+      invoke('get_studios'),
+    ]);
+    state.works = results[0] || [];
+    state.tags = results[1] || [];
+    state.years = results[2] || [];
+    state.studios = results[3] || [];
+
+    var coverPaths = [];
+    state.works.forEach(function(w){ if(w.cover_path) coverPaths.push(w.cover_path); });
+    await loadCovers(coverPaths);
+
+    applyFilter();
+  } catch(e) {
+    console.error('init failed:', e);
+    document.getElementById('coverGrid').innerHTML = '<div class="empty-state"><h2>加载失败</h2><p>请检查 Tauri 后端是否正常运行</p></div>';
+  }
+}
+
+// ─── Filter Dropdowns ───────────────────
+
+function getFilterOptions(key) {
+  if (key === 'year') {
+    return state.years.map(function(y){ return { val: String(y), label: y + '年' }; });
+  }
+  if (key === 'studio') {
+    return state.studios.map(function(s){ return { val: s, label: s }; });
+  }
+  if (key === 'story' || key === 'attr' || key === 'scene') {
+    var cat = CAT_MAP[key];
+    var names = [];
+    var seen = {};
+    state.tags.forEach(function(t){
+      if (t.category === cat && !seen[t.name]) { seen[t.name] = true; names.push(t.name); }
+    });
+    names.sort(function(a,b){ return a.localeCompare(b); });
+    return names.map(function(n){ return { val: n, label: n }; });
+  }
+  return [];
+}
+
+function openDropdown(key, btn) {
+  var existing = document.getElementById('filterDropdown');
+  if (existing && existing.getAttribute('data-key') === key) { existing.remove(); return; }
+  closeDropdown();
+
+  var dd = document.createElement('div');
+  dd.id = 'filterDropdown';
+  dd.className = 'filter-dd';
+  dd.setAttribute('data-key', key);
+
+  var isVertical = (key === 'year' || key === 'studio');
+  dd.style.width = isVertical ? '180px' : 'min(480px, calc(100vw - 20px))';
+
+  var btnRect = btn.getBoundingClientRect();
+  dd.style.left = Math.round(btnRect.left + btnRect.width/2) + 'px';
+  dd.style.transform = 'translateX(-50%)';
+  dd.style.top = (btnRect.bottom + 2) + 'px';
+
+  var options = getFilterOptions(key);
+  var catLabel = { year:'年份', story:'剧情', attr:'属性', scene:'场景', studio:'制作商' }[key] || key;
+
+  var html = '<div class="dd-header">' + catLabel + '</div>';
+  html += '<div class="dd-body ' + (isVertical ? 'col' : 'row') + '">';
+  options.forEach(function(o){
+    var sel = state.activeFilters[key] && state.activeFilters[key][o.val];
+    html += '<span class="dd-tag' + (sel ? ' selected' : '') + '" data-val="' + escHtml(o.val) + '" onclick="toggleFilter(\'' + key + '\',this)">' + o.label + '</span>';
+  });
+  html += '</div>';
+  html += '<div class="dd-actions"><span onclick="clearFilter(\'' + key + '\')">清除</span><span class="primary" onclick="closeDropdown()">确定</span></div>';
+  dd.innerHTML = html;
+  document.body.appendChild(dd);
+
+  setTimeout(function(){
+    if (!dd.parentNode) return;
+    var dr = dd.getBoundingClientRect();
+    if (dr.left < 4) { dd.style.transform = 'none'; dd.style.left = '4px'; }
+    if (dr.right > window.innerWidth - 4) { dd.style.transform = 'none'; dd.style.left = 'auto'; dd.style.right = '4px'; }
+  }, 0);
+}
+
+function closeDropdown() {
+  var dd = document.getElementById('filterDropdown');
+  if (dd) { dd.remove(); }
+}
+
+function toggleFilter(key, el) {
+  el.classList.toggle('selected');
+  var val = el.getAttribute('data-val');
+  if (!state.activeFilters[key]) state.activeFilters[key] = {};
+  if (el.classList.contains('selected')) {
+    state.activeFilters[key][val] = true;
+    el.style.borderColor = '#005fb8'; el.style.background = '#005fb8'; el.style.color = '#fff';
+  } else {
+    delete state.activeFilters[key][val];
+    el.style.borderColor = '#d1d1d6'; el.style.background = '#fff'; el.style.color = '#444';
+  }
+  applyFilter();
+}
+
+function clearFilter(key) {
+  delete state.activeFilters[key];
+  closeDropdown();
+  state.currentPage = 1;
+  applyFilter();
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Sort ──────────────────────────────
+
+function setSort(sortKey) {
+  state.currentSort = sortKey;
+  state.currentPage = 1;
+  document.getElementById('sortTimeBtn').innerHTML = '时间 ' + (sortKey === 'time-desc' ? '&#11015;' : '&#11014;');
+  document.getElementById('sortNameBtn').innerHTML = '名称 ' + ((sortKey === 'name-asc' || sortKey === 'name-desc') ? (sortKey === 'name-asc' ? '&#11014;' : '&#11015;') : '&#11014;');
+  applyFilter();
+}
+
+// ─── Apply Filter + Sort + Paginate ────
+
+function applyFilter() {
+  var results = state.works.slice();
+  var searchInput = document.getElementById('searchInput');
+  var clearBtn = document.getElementById('searchClear');
+
+  for (var key in state.activeFilters) {
+    var vals = Object.keys(state.activeFilters[key]);
+    if (!vals.length) continue;
+    results = results.filter(function(w){
+      if (key === 'year') return vals.some(function(v){ return String(w.year) === v; });
+      if (key === 'studio') return vals.indexOf(w.studio) >= 0;
+      var cat = CAT_MAP[key];
+      if (!cat) return true;
+      return (w.tags || []).some(function(t){ return t.category === cat && vals.indexOf(t.name) >= 0; });
+    });
+  }
+
+  var kw = (searchInput?.value || '').trim().toLowerCase();
+  if (clearBtn) clearBtn.classList.toggle('visible', !!kw);
+  if (kw) {
+    results = results.filter(function(w){
+      if (w.title.toLowerCase().indexOf(kw) >= 0) return true;
+      if ((w.description || '').toLowerCase().indexOf(kw) >= 0) return true;
+      if (w.studio.toLowerCase().indexOf(kw) >= 0) return true;
+      if ((w.tags || []).some(function(t){ return t.name.toLowerCase().indexOf(kw) >= 0; })) return true;
+      return false;
+    });
+  }
+
+  if (state.currentSort === 'time-desc') {
+    results.sort(function(a,b){ return b.year - a.year || b.month - a.month; });
+  } else if (state.currentSort === 'time-asc') {
+    results.sort(function(a,b){ return a.year - b.year || a.month - b.month; });
+  } else if (state.currentSort === 'name-asc') {
+    results.sort(function(a,b){ return a.title.localeCompare(b.title); });
+  } else if (state.currentSort === 'name-desc') {
+    results.sort(function(a,b){ return b.title.localeCompare(a.title); });
+  }
+
+  var total = results.length;
+  var totalPages = Math.max(1, Math.ceil(total / state.pageSize));
+  if (state.currentPage > totalPages) state.currentPage = totalPages;
+  var start = (state.currentPage - 1) * state.pageSize;
+  var pageItems = results.slice(start, start + state.pageSize);
+
+  renderGrid(pageItems, total, totalPages);
+
+  document.querySelectorAll('.filter-btn[data-filter]').forEach(function(b){
+    var k = b.getAttribute('data-filter');
+    b.classList.toggle('active', !!(state.activeFilters[k] && Object.keys(state.activeFilters[k]).length));
+  });
+}
+
+function clearSearch() {
+  var input = document.getElementById('searchInput');
+  if (!input) return;
+  input.value = '';
+  state.currentPage = 1;
+  applyFilter();
+  input.focus();
+}
+
+// ─── Render Grid ────────────────────────
+
+function renderGrid(items, total, totalPages) {
+  var grid = document.getElementById('coverGrid');
+  var count = document.getElementById('resultCount');
+  count.textContent = (total != null ? total : items.length) + ' 个作品';
+  if (!items.length) {
+    grid.innerHTML = '<div class="empty-state"><h2>暂无作品</h2><p>在设置中扫描目录导入作品</p></div>';
+    renderPagination(0, 1);
+    return;
+  }
+  grid.innerHTML = items.map(function(w){
+    var cUrl = coverUrl(w.cover_path);
+    var imgHtml = cUrl ? '<img src="' + cUrl + '" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0" onerror="this.style.display=\'none\'">' : '';
+    var date = w.year + '-' + String(w.month).padStart(2,'0');
+    var meta = [w.studio || '未知制作商', date, (w.episode_count || 0) + '集'].join(' / ');
+    return '<div class="cover-card" onclick="showDetail(' + w.id + ')" oncontextmenu="showWorkContextMenu(event,' + w.id + ')"><div class="cover-img">' +
+      imgHtml +
+      '<span style="font-size:36px;color:#bbb;">&#127916;</span>' +
+      '<div class="cover-hover"><div class="ch-title">' + escHtml(w.title) + '</div><div class="ch-meta">' + escHtml(meta) + '</div></div></div>' +
+      '<div class="cover-title">' + escHtml(w.title) + '</div></div>';
+  }).join('');
+  renderPagination(total || items.length, totalPages || 1);
+}
+
+function renderPagination(total, totalPages) {
+  var pag = document.getElementById('pagination');
+  if (!pag) return;
+  var h = '<span class="page-btn" onclick="goPage(' + (state.currentPage-1) + ')" style="' + (state.currentPage<=1?'opacity:0.3;pointer-events:none':'') + '">&#8249;</span>';
+  for (var i = 1; i <= totalPages; i++) {
+    if (i === state.currentPage) h += '<span class="page-num active">' + i + '</span>';
+    else if (i === 1 || i === totalPages || Math.abs(i - state.currentPage) <= 2) h += '<span class="page-num" onclick="goPage(' + i + ')">' + i + '</span>';
+    else if (h.indexOf('...') < 0) h += '<span class="page-dot">...</span>';
+  }
+  h += '<span class="page-btn" onclick="goPage(' + (state.currentPage+1) + ')" style="' + (state.currentPage>=totalPages?'opacity:0.3;pointer-events:none':'') + '">&#8250;</span>';
+  h += '<input type="number" id="pageJump" value="' + state.currentPage + '" min="1" max="' + totalPages + '" onkeydown="if(event.key===\'Enter\')jumpToPage()" style="width:48px;height:28px;border:1px solid #d1d1d6;border-radius:5px;font-size:12px;text-align:center;margin:0 4px">';
+  h += '<span style="font-size:12px;color:#999">共 ' + total + ' 部</span>';
+  pag.innerHTML = h;
+}
+
+function goPage(p) { state.currentPage = p; applyFilter(); }
+function jumpToPage() {
+  var inp = document.getElementById('pageJump');
+  if (!inp) return;
+  var p = parseInt(inp.value);
+  if (p >= 1) goPage(p);
+}
+
+// ─── Detail View ────────────────────────
+
+var currentDetailWorkId = null;
+
+async function showDetail(id) {
+  try {
+    var detail = await invoke('get_work_detail', { workId: id });
+    if (!detail || !detail.work) return;
+    currentDetailWorkId = id;
+    state.currentDetail = detail;
+    var w = detail.work;
+    var episodes = detail.episodes || [];
+    var tags = detail.tags || [];
+
+    document.getElementById('detailTitle').textContent = w.title;
+    document.getElementById('detailDate').textContent = w.year + '-' + String(w.month).padStart(2,'0');
+    document.getElementById('detailStudio').textContent = w.studio || '';
+    document.getElementById('detailDesc').textContent = w.description || '（暂无简介）';
+
+    var coverPaths = [];
+    if (w.cover_path) coverPaths.push(w.cover_path);
+    episodes.forEach(function(e){ if (e.cover_path) coverPaths.push(e.cover_path); });
+    await loadCovers(coverPaths);
+
+    var dc = document.getElementById('detailCover');
+    var wCover = coverUrl(w.cover_path);
+    if (wCover) {
+      dc.innerHTML = '<img src="' + wCover + '" style="width:100%;height:100%;object-fit:cover" onerror="this.style.display=\'none\';this.parentNode.innerHTML=\'&#127916\'">';
+    } else {
+      dc.innerHTML = '&#127916;';
+    }
+
+    var chars = tags.filter(function(t){ return t.category === '人物'; });
+    var storyTags = tags.filter(function(t){ return t.category === '剧情'; });
+    var attrTags = tags.filter(function(t){ return t.category === '属性'; });
+    var sceneTags = tags.filter(function(t){ return t.category === '场景'; });
+    var studioTags = tags.filter(function(t){ return t.category === '制作'; });
+
+    var tagHtml = '';
+    if (chars.length > 0) {
+      tagHtml += '<div class="detail-section-title">登场角色</div>';
+      chars.forEach(function(t){ tagHtml += '<span class="detail-tag">' + escHtml(t.name) + '</span>'; });
+      tagHtml += '<div style="width:100%;margin-top:6px"></div>';
+    }
+    if (storyTags.length > 0) {
+      tagHtml += '<div class="detail-section-title">剧情</div>';
+      storyTags.forEach(function(t){ tagHtml += '<span class="detail-tag">' + escHtml(t.name) + '</span>'; });
+      tagHtml += '<div style="width:100%;margin-top:6px"></div>';
+    }
+    if (attrTags.length > 0) {
+      tagHtml += '<div class="detail-section-title">属性</div>';
+      attrTags.forEach(function(t){ tagHtml += '<span class="detail-tag">' + escHtml(t.name) + '</span>'; });
+      tagHtml += '<div style="width:100%;margin-top:6px"></div>';
+    }
+    if (sceneTags.length > 0) {
+      tagHtml += '<div class="detail-section-title">场景</div>';
+      sceneTags.forEach(function(t){ tagHtml += '<span class="detail-tag">' + escHtml(t.name) + '</span>'; });
+      tagHtml += '<div style="width:100%;margin-top:6px"></div>';
+    }
+    if (studioTags.length > 0) {
+      tagHtml += '<div class="detail-section-title">制作</div>';
+      studioTags.forEach(function(t){ tagHtml += '<span class="detail-tag">' + escHtml(t.name) + '</span>'; });
+    }
+    document.getElementById('detailTags').innerHTML = tagHtml;
+
+    document.getElementById('episodeList').innerHTML = episodes.map(function(e){
+      var eCover = coverUrl(e.cover_path);
+      var eImgHtml = eCover ? '<img src="' + eCover + '" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0" onerror="this.style.display=\'none\'">' : '';
+      return '<div class="episode-item" onclick="playEpisode(\'' + escAttr(e.video_path) + '\')"><div class="episode-cover">' +
+        eImgHtml + '&#127916;</div>' +
+        '<div class="episode-info"><div class="episode-num">第' + e.number + '集</div><div class="episode-sub">' + escHtml(e.title) + '</div></div>' +
+        '<div class="episode-play">&#9654; 播放</div></div>';
+    }).join('');
+
+    document.getElementById('btnOpenFolder').onclick = function(){ openWorkFolder(w.folder_path); };
+    showPage('page-detail');
+  } catch(e) {
+    console.error('showDetail failed:', e);
+  }
+}
+
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/</g,'&lt;').replace(/"/g,'&quot;');
+}
+
+async function playEpisode(videoPath) {
+  try { await invoke('play_video', { videoPath: videoPath }); } catch(e) { console.error('play failed:', e); }
+}
+
+async function openWorkFolder(folderPath) {
+  try { await invoke('open_folder', { path: folderPath }); } catch(e) { console.error('open folder failed:', e); }
+}
+
+function askConfirm(title, body, actionText) {
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmBody').textContent = body;
+  var action = document.querySelector('#confirmModal .btn-danger');
+  if (action) action.textContent = actionText || '确认';
+  document.getElementById('confirmModal').classList.add('active');
+  return new Promise(function(resolve){ state.confirmResolver = resolve; });
+}
+
+function resolveConfirm(value) {
+  document.getElementById('confirmModal').classList.remove('active');
+  if (state.confirmResolver) {
+    state.confirmResolver(value);
+    state.confirmResolver = null;
+  }
+}
+
+function showWorkContextMenu(event, workId) {
+  event.preventDefault();
+  event.stopPropagation();
+  closeDropdown();
+  state.contextWorkId = workId;
+  var menu = document.getElementById('workContextMenu');
+  menu.classList.add('active');
+  menu.style.left = event.clientX + 'px';
+  menu.style.top = event.clientY + 'px';
+  var rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth - 6) menu.style.left = (window.innerWidth - rect.width - 6) + 'px';
+  if (rect.bottom > window.innerHeight - 6) menu.style.top = (window.innerHeight - rect.height - 6) + 'px';
+}
+
+function closeWorkContextMenu() {
+  var menu = document.getElementById('workContextMenu');
+  if (menu) menu.classList.remove('active');
+}
+
+async function deleteContextWork() {
+  var workId = state.contextWorkId;
+  closeWorkContextMenu();
+  if (!workId) return;
+  var work = state.works.find(function(w){ return w.id === workId; });
+  var title = work ? work.title : '';
+  var ok = await askConfirm('删除作品', '确定删除作品“' + title + '”？只会删除数据库记录，不会删除视频文件。', '删除');
+  if (!ok) return;
+  try {
+    await invoke('delete_work', { workId: workId });
+    if (currentDetailWorkId === workId) {
+      currentDetailWorkId = null;
+      state.currentDetail = null;
+      showHome();
+    }
+    await init();
+  } catch(e) {
+    var msg = document.getElementById('scanMsg') || document.getElementById('tagMsg');
+    if (msg) msg.innerHTML = '<div class="settings-msg err">删除失败: ' + escHtml(e) + '</div>';
+  }
+}
+
+// ─── Settings ───────────────────────────
+
+async function doScan() {
+  var path = document.getElementById('mediaPath').value.trim();
+  if (!path) return;
+  var msg = document.getElementById('scanMsg');
+  msg.innerHTML = '<div class="settings-msg info">扫描中...</div>';
+  try {
+    var folders = await invoke('scan_folder', { rootPath: path });
+    state.scanFolders = folders || [];
+    if (!folders.length) {
+      msg.innerHTML = '<div class="settings-msg info">未发现新作品</div>';
+      return;
+    }
+    var html = '<div class="settings-msg info">发现 ' + folders.length + ' 个新作品</div>';
+    html += '<div style="margin-top:8px;max-height:200px;overflow-y:auto;font-size:12px;color:#555">';
+    folders.forEach(function(f, i){
+      var name = f.split(/[\\/]/).pop();
+      html += '<div style="padding:4px 0;display:flex;align-items:center;gap:8px">' +
+        '<span style="flex:1">' + escHtml(name) + '</span>' +
+        '<button class="btn-secondary" onclick="doImportOne(\'' + escAttr(f) + '\')" style="font-size:11px;padding:2px 8px">导入</button></div>';
+    });
+    html += '</div>';
+    html += '<button class="btn-secondary" style="margin-top:6px" onclick="doBatchImport()">全部导入</button>';
+    msg.innerHTML = html;
+  } catch(e) {
+    msg.innerHTML = '<div class="settings-msg err">扫描失败: ' + e + '</div>';
+  }
+}
+
+async function doImportOne(dirPath) {
+  try {
+    var id = await invoke('import_work_via_json', { dirPath: dirPath });
+    var msg = document.getElementById('scanMsg');
+    msg.innerHTML = '<div class="settings-msg info">导入成功 ID=' + id + '</div>';
+    init();
+  } catch(e) {
+    document.getElementById('scanMsg').innerHTML = '<div class="settings-msg err">导入失败: ' + e + '</div>';
+  }
+}
+
+async function doBatchImport() {
+  try {
+    var count = await invoke('batch_import_folders', { folders: state.scanFolders });
+    document.getElementById('scanMsg').innerHTML = '<div class="settings-msg info">成功导入 ' + count + ' 个作品</div>';
+    init();
+  } catch(e) {
+    document.getElementById('scanMsg').innerHTML = '<div class="settings-msg err">批量导入失败: ' + e + '</div>';
+  }
+}
+
+async function doSync() {
+  var path = document.getElementById('mediaPath').value.trim();
+  if (!path) return;
+  var msg = document.getElementById('syncMsg');
+  msg.innerHTML = '<div class="settings-msg info">同步中...</div>';
+  try {
+    var result = await invoke('sync_database', { rootPath: path });
+    var html = '';
+    if (result.new_folders && result.new_folders.length > 0) {
+      html += '<div class="settings-msg info">发现 ' + result.new_folders.length + ' 个新文件夹</div>';
+    }
+    if (result.missing_works && result.missing_works.length > 0) {
+      html += '<div class="settings-msg err">有 ' + result.missing_works.length + ' 个作品路径不存在</div>';
+    }
+    if (!html) html = '<div class="settings-msg info">数据库已是最新</div>';
+    msg.innerHTML = html;
+    init();
+  } catch(e) {
+    msg.innerHTML = '<div class="settings-msg err">同步失败: ' + e + '</div>';
+  }
+}
+
+async function doBackup() {
+  var path = document.getElementById('dbFilePath').value.trim() || 'D:\\HAnime\\backup.db';
+  var msg = document.getElementById('dbMsg');
+  try {
+    await invoke('backup_database', { backupPath: path });
+    msg.innerHTML = '<div class="settings-msg info">备份成功: ' + escHtml(path) + '</div>';
+  } catch(e) {
+    msg.innerHTML = '<div class="settings-msg err">备份失败: ' + e + '</div>';
+  }
+}
+
+async function doRestore() {
+  var path = document.getElementById('dbFilePath').value.trim();
+  if (!path) return;
+  var msg = document.getElementById('dbMsg');
+  try {
+    await invoke('restore_database', { restorePath: path });
+    msg.innerHTML = '<div class="settings-msg info">恢复成功，请重启应用</div>';
+  } catch(e) {
+    msg.innerHTML = '<div class="settings-msg err">恢复失败: ' + e + '</div>';
+  }
+}
+
+// ─── Event Bindings ─────────────────────
+
+document.querySelectorAll('.filter-btn[data-filter]').forEach(function(btn){
+  btn.addEventListener('click', function(e){
+    e.stopPropagation();
+    openDropdown(this.getAttribute('data-filter'), this);
+  });
+});
+
+document.getElementById('sortTimeBtn').addEventListener('click', function(){
+  setSort(state.currentSort === 'time-desc' ? 'time-asc' : 'time-desc');
+});
+document.getElementById('sortNameBtn').addEventListener('click', function(){
+  setSort((state.currentSort === 'name-asc' || state.currentSort === 'name-desc') ? (state.currentSort === 'name-asc' ? 'name-desc' : 'name-asc') : 'name-asc');
+});
+
+document.addEventListener('click', function(e){
+  var dd = document.getElementById('filterDropdown');
+  if (dd && !dd.contains(e.target) && !e.target.closest('.filter-btn')) { dd.remove(); }
+  if (!e.target.closest('.context-menu')) closeWorkContextMenu();
+});
+
+document.addEventListener('contextmenu', function(e){
+  if (!e.target.closest('.cover-card')) {
+    e.preventDefault();
+    closeWorkContextMenu();
+  }
+});
+
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape') {
+    closeDropdown();
+    closeWorkContextMenu();
+    resolveConfirm(false);
+  }
+});
+
+document.getElementById('confirmModal').addEventListener('click', function(e){
+  if (e.target === this) resolveConfirm(false);
+});
+
+// ─── Start ──────────────────────────────
+
+if (invoke) {
+  init();
+} else {
+  document.getElementById('coverGrid').innerHTML = '<div class="empty-state"><h2>Tauri 未连接</h2><p>请在 Tauri 窗口中打开此页面</p></div>';
+}
+</script>
+</body>
+</html>
