@@ -1481,9 +1481,15 @@ async function setArchiveCoverFromLastFrame() {
   var last = archiveLastFrameFor(null);
   if (!last) return;
   try {
-    state.archive.coverData = await captureArchiveFrameToData(last.videoPath, last.time);
+    var coverData = await captureArchiveFrameToData(last.videoPath, last.time);
+    var dirPath = document.getElementById('archiveDir').value.trim();
+    var savedPath = await invoke('save_archive_cover', {
+      input: { dir_path: dirPath, image_data: coverData, episode_id: null }
+    });
+    state.archive.coverData = coverData;
+    if (state.archive.draft) state.archive.draft.cover_path = savedPath;
     renderCoverDrop(state.archive.coverData);
-    showArchiveMsg('info', '已用 ' + formatTime(last.time) + ' 设为主封面预览，保存后写入 data');
+    showArchiveMsg('info', '已用 ' + formatTime(last.time) + ' 写入主封面: ' + savedPath);
   } catch(e) {
     showArchiveMsg('err', '截主封面失败: ' + (e.message || e));
   }
@@ -1493,9 +1499,18 @@ async function setArchiveEpisodeCoverFromLastFrame(epId) {
   var last = archiveLastFrameFor(epId);
   if (!last) return;
   try {
-    state.archive.episodeCoverData[String(epId)] = await captureArchiveFrameToData(last.videoPath, last.time);
+    var coverData = await captureArchiveFrameToData(last.videoPath, last.time);
+    var dirPath = document.getElementById('archiveDir').value.trim();
+    var savedPath = await invoke('save_archive_cover', {
+      input: { dir_path: dirPath, image_data: coverData, episode_id: Number(epId) }
+    });
+    state.archive.episodeCoverData[String(epId)] = coverData;
+    if (state.archive.draft) {
+      var ep = state.archive.draft.episode_list.find(function(item){ return Number(item.id) === Number(epId); });
+      if (ep) ep.cover_path = savedPath;
+    }
     renderArchiveEpisodes();
-    showArchiveMsg('info', '已用 ' + formatTime(last.time) + ' 设为第' + epId + '集封面预览，保存后写入 data');
+    showArchiveMsg('info', '已用 ' + formatTime(last.time) + ' 写入第' + epId + '集封面: ' + savedPath);
   } catch(e) {
     showArchiveMsg('err', '截本集封面失败: ' + (e.message || e));
   }

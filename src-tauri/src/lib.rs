@@ -128,6 +128,13 @@ pub struct ArchiveEpisodeCoverSaveInput {
     pub covers: Vec<EpisodeCoverInput>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ArchiveCoverSaveInput {
+    pub dir_path: String,
+    pub image_data: String,
+    pub episode_id: Option<i32>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct CapturedCover {
     pub cover_path: String,
@@ -924,6 +931,16 @@ fn make_archive_draft(
 #[tauri::command]
 fn inspect_archive_folder(dir_path: String, title: Option<String>) -> Result<ArchiveDraft, String> {
     make_archive_draft(&dir_path, title)
+}
+
+#[tauri::command]
+fn save_archive_cover(input: ArchiveCoverSaveInput) -> Result<String, String> {
+    let data_dir = std::path::Path::new(&input.dir_path).join("data");
+    let stem = input
+        .episode_id
+        .map(|id| format!("cover_ep{}", id))
+        .unwrap_or_else(|| "cover".to_string());
+    write_image_data(&data_dir, &stem, &input.image_data)
 }
 
 #[tauri::command]
@@ -2722,6 +2739,7 @@ pub fn run() {
             inspect_archive_folder,
             save_archive_draft,
             save_archive_json,
+            save_archive_cover,
             save_archive_episode_covers,
             scrape_archive_sources,
             detect_duplicates,
