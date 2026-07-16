@@ -161,6 +161,7 @@
   .archive-input:focus,.archive-textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,0.10)}
   .archive-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .archive-inline-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .frame-tool{display:grid;grid-template-columns:minmax(140px,220px) repeat(3,auto);gap:8px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fbfcfd}
   .json-paste{min-height:210px;font-family:Consolas,"Cascadia Mono",monospace;font-size:12px;line-height:1.55}
   .drop-zone{border:1px dashed #c5ccd7;border-radius:10px;background:#f8fafc;min-height:180px;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--muted);font-size:13px;overflow:hidden;cursor:pointer}
   .drop-zone.small{width:112px;height:63px;min-height:63px;border-radius:7px;flex-shrink:0}
@@ -207,6 +208,7 @@
     .settings,.workspace{width:calc(100% - 32px)}
     .settings-grid,.unarchived-toolbar{grid-template-columns:1fr}
     .archive-shell{grid-template-columns:1fr}
+    .frame-tool{grid-template-columns:1fr}
     .archive-panel.sticky{position:static}
     .episode-editor-main,.episode-tags{grid-template-columns:1fr}
   }
@@ -412,6 +414,15 @@
             <button class="btn-secondary" onclick="saveArchive(true)">保存并导入</button>
           </div>
           <div id="archiveMsg"></div>
+
+          <div style="height:16px"></div>
+          <div class="archive-section-title">取帧工具</div>
+          <div class="frame-tool">
+            <select class="archive-input" id="archiveFrameEpisode"></select>
+            <button class="btn-secondary" onclick="playSelectedArchiveEpisodeForCover()">播放取帧</button>
+            <button class="btn-secondary" onclick="setArchiveCoverFromLastFrame()">设为主封面</button>
+            <button class="btn-secondary" onclick="setSelectedArchiveEpisodeCoverFromLastFrame()">设为本集封面</button>
+          </div>
 
           <div style="height:16px"></div>
           <div class="archive-section-title">元数据</div>
@@ -1311,6 +1322,7 @@ function openArchiveAssistant(dirPath) {
   document.getElementById('archiveCharacters').value = '';
   document.getElementById('archiveSynopsis').value = '';
   document.getElementById('archiveEpisodes').innerHTML = '';
+  document.getElementById('archiveFrameEpisode').innerHTML = '';
   document.getElementById('scrapedTags').innerHTML = '';
   document.getElementById('archiveCoverDrop').innerHTML = '拖入主封面';
   document.getElementById('archiveMsg').innerHTML = '';
@@ -1341,6 +1353,7 @@ async function loadArchiveDraft() {
     }
     var epCovers = draft.episode_list.map(function(ep){ return ep.cover_path; }).filter(Boolean);
     await loadCovers(epCovers);
+    renderArchiveFrameTool();
     renderArchiveEpisodes();
     showArchiveMsg('info', '已读取目录，发现 ' + draft.episodes + ' 个视频');
   } catch(e) {
@@ -1386,6 +1399,19 @@ function renderArchiveEpisodes() {
   setupArchiveDropZones();
 }
 
+function renderArchiveFrameTool() {
+  var select = document.getElementById('archiveFrameEpisode');
+  var draft = state.archive.draft;
+  if (!select) return;
+  if (!draft || !draft.episode_list || !draft.episode_list.length) {
+    select.innerHTML = '<option value="">无视频</option>';
+    return;
+  }
+  select.innerHTML = draft.episode_list.map(function(ep){
+    return '<option value="' + ep.id + '">第' + ep.id + '集</option>';
+  }).join('');
+}
+
 function setupArchiveDropZones() {
   var main = document.getElementById('archiveCoverDrop');
   if (main && !main.dataset.bound) {
@@ -1420,6 +1446,17 @@ async function playArchiveEpisodeForCover(epId) {
     number: ep.id,
     video_path: ep.video_path,
   }, (state.archive.draft.title || '建档') + ' / 第' + ep.id + '集取帧', 'archive');
+}
+
+function selectedArchiveFrameEpisodeId() {
+  var select = document.getElementById('archiveFrameEpisode');
+  return select ? Number(select.value) : 0;
+}
+
+async function playSelectedArchiveEpisodeForCover() {
+  var epId = selectedArchiveFrameEpisodeId();
+  if (!epId) { showArchiveMsg('err', '请先读取目录并选择集数'); return; }
+  await playArchiveEpisodeForCover(epId);
 }
 
 async function captureArchiveFrameToData(videoPath, time) {
@@ -1462,6 +1499,12 @@ async function setArchiveEpisodeCoverFromLastFrame(epId) {
   } catch(e) {
     showArchiveMsg('err', '截本集封面失败: ' + (e.message || e));
   }
+}
+
+async function setSelectedArchiveEpisodeCoverFromLastFrame() {
+  var epId = selectedArchiveFrameEpisodeId();
+  if (!epId) { showArchiveMsg('err', '请先选择集数'); return; }
+  await setArchiveEpisodeCoverFromLastFrame(epId);
 }
 
 function bindDropZone(el, onFile) {
