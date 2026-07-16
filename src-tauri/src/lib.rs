@@ -178,13 +178,11 @@ struct WorkMeta {
 fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
     let path = std::path::Path::new(dir_path);
     if !path.is_dir() { return Err("不是目录".to_string()); }
-    if let Ok(existing_id) = conn.query_row(
+    let existing_id = conn.query_row(
         "SELECT Id FROM Works WHERE lower(FolderPath) = lower(?1) LIMIT 1",
         params![dir_path],
         |r| r.get::<_, i64>(0),
-    ) {
-        return Ok(existing_id);
-    }
+    ).ok();
     let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
     let data_dir = path.join("data");
 
@@ -220,9 +218,19 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         parse_year_month(release).unwrap_or((2024, 1))
     } else { (2024, 1) };
 
-    conn.execute("INSERT INTO Works (Title,Year,Month,Studio,Description,FolderPath) VALUES (?1,?2,?3,?4,?5,?6)",
-        params![title, year, month, studio, synopsis, dir_path]).map_err(|e| e.to_string())?;
-    let work_id: i64 = conn.last_insert_rowid();
+    let work_id: i64 = if let Some(existing_id) = existing_id {
+        conn.execute(
+            "UPDATE Works SET Title=?1,Year=?2,Month=?3,Studio=?4,Description=?5,FolderPath=?6,CoverPath=NULL,UpdatedAt=datetime('now','localtime') WHERE Id=?7",
+            params![title, year, month, studio, synopsis, dir_path, existing_id],
+        ).map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM WorkTags WHERE WorkId=?1", params![existing_id]).map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM Episodes WHERE WorkId=?1", params![existing_id]).map_err(|e| e.to_string())?;
+        existing_id
+    } else {
+        conn.execute("INSERT INTO Works (Title,Year,Month,Studio,Description,FolderPath) VALUES (?1,?2,?3,?4,?5,?6)",
+            params![title, year, month, studio, synopsis, dir_path]).map_err(|e| e.to_string())?;
+        conn.last_insert_rowid()
+    };
 
     // Scan videos
     let mut videos: Vec<_> = Vec::new();
