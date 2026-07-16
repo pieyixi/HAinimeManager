@@ -7,11 +7,12 @@
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   :root{--bg:#f6f7f9;--panel:#fff;--line:#e6e9ef;--line-strong:#cfd5dd;--text:#171a1f;--muted:#6f7782;--soft:#98a1ad;--primary:#2563eb;--primary-soft:#eff5ff;--danger:#c93535;--danger-soft:#fff1f1}
-  html,body{width:100%;height:100%;overflow:hidden}
-  body{font-family:"Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+  html,body{width:100%;height:100%;overflow:hidden;background:transparent}
+  body{font-family:"Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:transparent;color:var(--text);-webkit-font-smoothing:antialiased}
   .window{width:100vw;height:100vh;background:var(--bg);overflow:hidden;display:flex;flex-direction:column}
   .page{display:none;flex:1;min-height:0}
   .page.active{display:flex;min-height:0;flex:1;overflow:auto}
+  body.player-mode .window,body.player-mode #page-player,body.player-mode .player-page,body.player-mode .player-shell{background:transparent}
   .home{height:100%;min-height:0;width:100%;display:flex;flex-direction:column}
   .search-row{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:minmax(120px,1fr) minmax(420px,720px) minmax(120px,1fr);align-items:center;gap:18px;padding:18px 32px 10px;background:rgba(246,247,249,0.96);backdrop-filter:blur(12px)}
   .toolbar-spacer{min-width:0}
@@ -101,6 +102,7 @@
   .player-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
   .player-title{font-size:18px;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .player-stage{background:#05070b;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:0;border:1px solid #0b1220;position:relative}
+  body.player-mode .player-stage{background:transparent;border-color:rgba(11,18,32,0.42)}
   .mpv-host-hint{color:#7b8494;font-size:13px;pointer-events:none}
   .player-controls{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(15,23,42,0.05)}
   .player-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -471,6 +473,7 @@ var state = {
     timer: null,
     currentTime: 0,
     duration: 0,
+    libmpvReady: false,
   },
   archive: {
     draft: null,
@@ -517,6 +520,7 @@ function updatePageSize(preservePosition) {
 function showPage(id) {
   document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
   document.getElementById(id).classList.add('active');
+  document.body.classList.toggle('player-mode', id === 'page-player');
 }
 
 function showHome() {
@@ -910,19 +914,55 @@ function updatePlayerControls() {
   time.textContent = formatTime(current) + ' / ' + formatTime(duration);
 }
 
-function syncMpvBounds() {
+function mpvPlugin(command, args) {
+  return invoke('plugin:libmpv|' + command, args || {});
+}
+
+function mpvCommand(name, args) {
+  return mpvPlugin('command', { name: name, args: args || [], windowLabel: 'main' });
+}
+
+function mpvSetProperty(name, value) {
+  return mpvPlugin('set_property', { name: name, value: value, windowLabel: 'main' });
+}
+
+function mpvGetProperty(name, format) {
+  return mpvPlugin('get_property', { name: name, format: format, windowLabel: 'main' });
+}
+
+async function initLibMpv() {
+  if (state.player.libmpvReady) return;
+  await mpvPlugin('init', {
+    windowLabel: 'main',
+    mpvConfig: {
+      initialOptions: {
+        vo: 'gpu-next',
+        hwdec: 'auto-safe',
+        'keep-open': 'yes',
+        'force-window': 'yes',
+        osc: 'no',
+      },
+      observedProperties: {},
+    },
+  });
+  state.player.libmpvReady = true;
+}
+
+async function syncMpvBounds() {
+  if (!state.player.libmpvReady) return;
   var stage = document.getElementById('mpvStage');
   if (!stage) return;
   var rect = stage.getBoundingClientRect();
-  var borderX = Math.max(0, ((window.outerWidth || window.innerWidth) - window.innerWidth) / 2);
-  var chromeY = Math.max(0, (window.outerHeight || window.innerHeight) - window.innerHeight - borderX);
-  var screenX = (window.screenX !== undefined ? window.screenX : window.screenLeft || 0);
-  var screenY = (window.screenY !== undefined ? window.screenY : window.screenTop || 0);
-  invoke('set_mpv_bounds', {
-    x: Math.round(screenX + borderX + rect.left),
-    y: Math.round(screenY + chromeY + rect.top),
-    width: Math.round(rect.width),
-    height: Math.round(rect.height),
+  var width = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+  var height = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+  await mpvPlugin('set_video_margin_ratio', {
+    windowLabel: 'main',
+    ratio: {
+      left: Math.max(0, rect.left / width),
+      right: Math.max(0, (width - rect.right) / width),
+      top: Math.max(0, rect.top / height),
+      bottom: Math.max(0, (height - rect.bottom) / height),
+    },
   }).catch(function(){});
 }
 
@@ -935,17 +975,18 @@ function stopPlayerTimer() {
 
 async function pollMpvStatus() {
   try {
-    var status = await invoke('mpv_status');
-    if (status && status.available === false) {
-      stopPlayerTimer();
-      document.getElementById('mpvHint').textContent = 'mpv 已关闭';
-      playerMessage('info', '播放器已关闭');
-      return;
-    }
-    state.player.currentTime = status.time_seconds || 0;
-    state.player.duration = status.duration_seconds || state.player.duration || 0;
+    if (!state.player.libmpvReady) return;
+    var current = await mpvGetProperty('time-pos', 'double');
+    var duration = await mpvGetProperty('duration', 'double');
+    state.player.currentTime = Number(current) || 0;
+    state.player.duration = Number(duration) || state.player.duration || 0;
     updatePlayerControls();
-  } catch(e) {}
+  } catch(e) {
+    stopPlayerTimer();
+    state.player.libmpvReady = false;
+    document.getElementById('mpvHint').textContent = 'mpv 已关闭';
+    playerMessage('info', '播放器已关闭');
+  }
 }
 
 async function openPlayer(episodeId) {
@@ -958,13 +999,14 @@ async function openPlayer(episodeId) {
   document.getElementById('mpvHint').textContent = '正在启动 mpv 播放窗口...';
   playerMessage('info', '正在启动 mpv 播放内核...');
   showPage('page-player');
-  syncMpvBounds();
   stopPlayerTimer();
   try {
-    await invoke('start_embedded_mpv', { episodeId: ep.id });
+    await initLibMpv();
+    await syncMpvBounds();
+    await mpvCommand('loadfile', [ep.video_path]);
     document.getElementById('mpvHint').textContent = '';
-    playerMessage('info', 'mpv 已贴入播放区域');
-    syncMpvBounds();
+    playerMessage('info', 'libmpv 已启动');
+    await syncMpvBounds();
     await setPlayerVolume(document.getElementById('playerVolume').value);
     await pollMpvStatus();
     state.player.timer = setInterval(function(){
@@ -979,30 +1021,34 @@ async function openPlayer(episodeId) {
 
 async function returnFromPlayer() {
   stopPlayerTimer();
-  try { await invoke('stop_embedded_mpv'); } catch(e) {}
+  try { await mpvPlugin('destroy', { windowLabel: 'main' }); } catch(e) {}
+  state.player.libmpvReady = false;
+  state.player.currentTime = 0;
+  state.player.duration = 0;
+  updatePlayerControls();
   showPage('page-detail');
 }
 
 async function togglePlayerPlay() {
-  try { await invoke('mpv_command', { action: 'toggle_pause', value: null }); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
+  try { await mpvCommand('cycle', ['pause']); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
 }
 
 async function seekPlayer(delta) {
-  try { await invoke('mpv_command', { action: 'seek_relative', value: delta }); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
+  try { await mpvCommand('seek', [delta, 'relative']); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
 }
 
 async function seekPlayerTo(value) {
   state.player.currentTime = Math.max(0, Number(value) || 0);
   updatePlayerControls();
-  try { await invoke('mpv_command', { action: 'seek_absolute', value: state.player.currentTime }); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
+  try { await mpvCommand('seek', [state.player.currentTime, 'absolute']); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
 }
 
 async function setPlayerVolume(value) {
-  try { await invoke('mpv_command', { action: 'set_volume', value: Math.max(0, Math.min(100, Number(value) || 0)) }); } catch(e) { playerMessage('err', String(e)); }
+  try { await mpvSetProperty('volume', Math.max(0, Math.min(100, Number(value) || 0))); } catch(e) { playerMessage('err', String(e)); }
 }
 
 async function toggleMute() {
-  try { await invoke('mpv_command', { action: 'toggle_mute', value: null }); } catch(e) { playerMessage('err', String(e)); }
+  try { await mpvCommand('cycle', ['mute']); } catch(e) { playerMessage('err', String(e)); }
 }
 
 async function playEpisode(videoPath) {

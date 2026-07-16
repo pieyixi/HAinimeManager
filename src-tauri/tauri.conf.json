@@ -15,11 +15,13 @@
         "title": "本地里番管理器",
         "width": 1360,
         "height": 900,
-        "resizable": true
+        "resizable": true,
+        "transparent": true
       }
     ]
   },
   "bundle": {
-    "icon": ["icons/icon.png"]
+    "icon": ["icons/icon.png"],
+    "resources": ["lib/**/*"]
   }
 }
