@@ -238,10 +238,12 @@
           <input class="s-input" type="text" id="mediaPath" value="D:\HAnime">
           <button class="btn-secondary" onclick="doScan()">扫描</button>
           <button class="btn-secondary" onclick="doSync()">同步</button>
+          <button class="btn-secondary" onclick="doDuplicateCheck()">查重</button>
           <button class="btn-secondary" onclick="openArchiveAssistant()">建档助手</button>
         </div>
         <div id="scanMsg"></div>
         <div id="syncMsg"></div>
+        <div id="duplicateMsg"></div>
       </div>
       <div class="settings-divider"></div>
       <div class="settings-group">
@@ -1101,6 +1103,38 @@ async function doSync() {
     init();
   } catch(e) {
     msg.innerHTML = '<div class="settings-msg err">同步失败: ' + e + '</div>';
+  }
+}
+
+async function doDuplicateCheck() {
+  var path = document.getElementById('mediaPath').value.trim();
+  if (!path) return;
+  var msg = document.getElementById('duplicateMsg');
+  msg.innerHTML = '<div class="settings-msg info">查重中...</div>';
+  try {
+    var groups = await invoke('detect_duplicates', { rootPath: path });
+    if (!groups.length) {
+      msg.innerHTML = '<div class="settings-msg info">未发现重复作品</div>';
+      return;
+    }
+    var html = '<div class="settings-msg err">发现 ' + groups.length + ' 组疑似重复</div>';
+    html += '<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">';
+    groups.forEach(function(group, idx){
+      html += '<div style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px">';
+      html += '<div style="font-size:12px;color:#6b7280;margin-bottom:6px">重复组 ' + (idx + 1) + '</div>';
+      group.items.forEach(function(item){
+        var size = item.total_size ? Math.round(item.total_size / 1024 / 1024) + ' MB' : '未知大小';
+        html += '<div style="font-size:12px;line-height:1.6;padding:4px 0;border-top:1px solid #f1f3f6">' +
+          '<div><strong>' + escHtml(item.title) + '</strong> <span style="color:#6b7280">(' + escHtml(item.source) + ' / ' + item.video_count + '集 / ' + size + ')</span></div>' +
+          '<div style="color:#6b7280;word-break:break-all">' + escHtml(item.folder_path) + '</div>' +
+          '</div>';
+      });
+      html += '</div>';
+    });
+    html += '</div>';
+    msg.innerHTML = html;
+  } catch(e) {
+    msg.innerHTML = '<div class="settings-msg err">查重失败: ' + escHtml(e) + '</div>';
   }
 }
 
