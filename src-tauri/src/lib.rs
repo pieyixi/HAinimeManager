@@ -1,7 +1,18 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::io::{BufRead, Write};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Manager, State};
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::HWND;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DestroyWindow, MoveWindow, ShowWindow, SW_SHOW, WS_CHILD, WS_CLIPSIBLINGS,
+    WS_VISIBLE,
+};
 
 // ─── Data Models ──────────────────────────────────────────
 
@@ -132,6 +143,23 @@ pub struct ArchiveEpisodeCoverSaveInput {
 pub struct CapturedCover {
     pub cover_path: String,
     pub target: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MpvStatus {
+    pub available: bool,
+    pub message: String,
+    pub time_seconds: f64,
+    pub duration_seconds: f64,
+}
+
+#[derive(Debug, Default)]
+pub struct MpvPlayerState {
+    #[cfg(target_os = "windows")]
+    pub host_hwnd: isize,
+    pub child: Option<std::process::Child>,
+    pub pipe_name: String,
+    pub episode_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -2310,6 +2338,284 @@ fn ffmpeg_path() -> String {
     })
 }
 
+fn mpv_path() -> Option<String> {
+    if let Ok(path) = std::env::var("MPV_PATH") {
+        if std::path::Path::new(&path).exists() {
+            return Some(path);
+        }
+    }
+    let candidates = [
+        r"D:\Envirnment\mpv\mpv.exe",
+        r"D:\Envirnment\mpv\bin\mpv.exe",
+        r"C:\Program Files\mpv\mpv.exe",
+        r"C:\Program Files (x86)\mpv\mpv.exe",
+    ];
+    candidates
+        .iter()
+        .find(|path| std::path::Path::new(path).exists())
+        .map(|path| path.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn wide_null(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(target_os = "windows")]
+fn create_mpv_host(parent_hwnd: HWND) -> Result<HWND, String> {
+    let class_name = wide_null("STATIC");
+    let title = wide_null("");
+    let hwnd = unsafe {
+        CreateWindowExW(
+            0,
+            class_name.as_ptr(),
+            title.as_ptr(),
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+            0,
+            0,
+            100,
+            100,
+            parent_hwnd,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if hwnd.is_null() {
+        Err("创建 mpv 承载窗口失败".to_string())
+    } else {
+        unsafe {
+            ShowWindow(hwnd, SW_SHOW);
+        }
+        Ok(hwnd)
+    }
+}
+
+fn mpv_ipc_command(
+    pipe_name: &str,
+    command: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(pipe_name)
+        .map_err(|e| format!("连接 mpv IPC 失败: {}", e))?;
+    let line = format!("{}\n", command);
+    file.write_all(line.as_bytes())
+        .map_err(|e| format!("发送 mpv 命令失败: {}", e))?;
+    file.flush().ok();
+    let mut reader = std::io::BufReader::new(file);
+    let mut response = String::new();
+    reader
+        .read_line(&mut response)
+        .map_err(|e| format!("读取 mpv 响应失败: {}", e))?;
+    serde_json::from_str(response.trim()).map_err(|e| format!("解析 mpv 响应失败: {}", e))
+}
+
+fn mpv_get_time(pipe_name: &str) -> Result<f64, String> {
+    let response = mpv_ipc_command(
+        pipe_name,
+        serde_json::json!({"command":["get_property","time-pos"]}),
+    )?;
+    Ok(response.get("data").and_then(|v| v.as_f64()).unwrap_or(0.0))
+}
+
+fn mpv_get_duration(pipe_name: &str) -> Result<f64, String> {
+    let response = mpv_ipc_command(
+        pipe_name,
+        serde_json::json!({"command":["get_property","duration"]}),
+    )?;
+    Ok(response.get("data").and_then(|v| v.as_f64()).unwrap_or(0.0))
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn start_embedded_mpv(
+    app: tauri::AppHandle,
+    episode_id: i64,
+    db: State<Database>,
+    player: State<Mutex<MpvPlayerState>>,
+) -> Result<MpvStatus, String> {
+    let mpv = mpv_path().ok_or_else(|| {
+        "未找到 mpv.exe。请把 mpv.exe 放到 D:\\Envirnment\\mpv\\mpv.exe / D:\\Envirnment\\mpv\\bin\\mpv.exe，或设置 MPV_PATH 指向 mpv.exe".to_string()
+    })?;
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let video_path: String = conn
+        .query_row(
+            "SELECT VideoPath FROM Episodes WHERE Id=?1",
+            params![episode_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    drop(conn);
+
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "找不到主窗口".to_string())?;
+    let parent_hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as HWND;
+
+    let mut state = player.lock().map_err(|e| e.to_string())?;
+    if let Some(mut child) = state.child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    if state.host_hwnd != 0 {
+        unsafe {
+            DestroyWindow(state.host_hwnd as HWND);
+        }
+        state.host_hwnd = 0;
+    }
+
+    let host_hwnd = create_mpv_host(parent_hwnd)?;
+    let pipe_name = format!(r"\\.\pipe\hanime_mpv_{}_{}", std::process::id(), episode_id);
+    let child = std::process::Command::new(&mpv)
+        .arg(format!("--wid={}", host_hwnd as isize))
+        .arg(format!("--input-ipc-server={}", pipe_name))
+        .arg("--force-window=yes")
+        .arg("--keep-open=yes")
+        .arg("--idle=no")
+        .arg("--no-terminal")
+        .arg("--osc=no")
+        .arg("--no-border")
+        .arg(&video_path)
+        .creation_flags(0x08000000)
+        .spawn()
+        .map_err(|e| format!("启动 mpv 失败: {}", e))?;
+
+    state.host_hwnd = host_hwnd as isize;
+    state.child = Some(child);
+    state.pipe_name = pipe_name;
+    state.episode_id = Some(episode_id);
+
+    Ok(MpvStatus {
+        available: true,
+        message: "mpv 已启动".to_string(),
+        time_seconds: 0.0,
+        duration_seconds: 0.0,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn start_embedded_mpv(
+    _app: tauri::AppHandle,
+    _episode_id: i64,
+    _db: State<Database>,
+    _player: State<Mutex<MpvPlayerState>>,
+) -> Result<MpvStatus, String> {
+    Err("当前只支持 Windows 内嵌 mpv".to_string())
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn set_mpv_bounds(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    player: State<Mutex<MpvPlayerState>>,
+) -> Result<(), String> {
+    let state = player.lock().map_err(|e| e.to_string())?;
+    if state.host_hwnd == 0 {
+        return Ok(());
+    }
+    unsafe {
+        MoveWindow(
+            state.host_hwnd as HWND,
+            x,
+            y,
+            width.max(1),
+            height.max(1),
+            1,
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+fn set_mpv_bounds(
+    _x: i32,
+    _y: i32,
+    _width: i32,
+    _height: i32,
+    _player: State<Mutex<MpvPlayerState>>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
+fn mpv_command(
+    action: String,
+    value: Option<f64>,
+    player: State<Mutex<MpvPlayerState>>,
+) -> Result<MpvStatus, String> {
+    let state = player.lock().map_err(|e| e.to_string())?;
+    if state.pipe_name.is_empty() {
+        return Err("mpv 尚未启动".to_string());
+    }
+    let command = match action.as_str() {
+        "toggle_pause" => serde_json::json!({"command":["cycle","pause"]}),
+        "seek_relative" => {
+            serde_json::json!({"command":["seek", value.unwrap_or(0.0), "relative"]})
+        }
+        "seek_absolute" => {
+            serde_json::json!({"command":["seek", value.unwrap_or(0.0), "absolute"]})
+        }
+        _ => return Err("未知 mpv 命令".to_string()),
+    };
+    mpv_ipc_command(&state.pipe_name, command)?;
+    let time_seconds = mpv_get_time(&state.pipe_name).unwrap_or(0.0);
+    Ok(MpvStatus {
+        available: true,
+        message: "ok".to_string(),
+        time_seconds,
+        duration_seconds: mpv_get_duration(&state.pipe_name).unwrap_or(0.0),
+    })
+}
+
+#[tauri::command]
+fn mpv_status(player: State<Mutex<MpvPlayerState>>) -> Result<MpvStatus, String> {
+    let state = player.lock().map_err(|e| e.to_string())?;
+    if state.pipe_name.is_empty() {
+        return Ok(MpvStatus {
+            available: false,
+            message: "mpv 尚未启动".to_string(),
+            time_seconds: 0.0,
+            duration_seconds: 0.0,
+        });
+    }
+    Ok(MpvStatus {
+        available: true,
+        message: "ok".to_string(),
+        time_seconds: mpv_get_time(&state.pipe_name).unwrap_or(0.0),
+        duration_seconds: mpv_get_duration(&state.pipe_name).unwrap_or(0.0),
+    })
+}
+
+#[tauri::command]
+fn stop_embedded_mpv(player: State<Mutex<MpvPlayerState>>) -> Result<(), String> {
+    let mut state = player.lock().map_err(|e| e.to_string())?;
+    if !state.pipe_name.is_empty() {
+        let _ = mpv_ipc_command(&state.pipe_name, serde_json::json!({"command":["quit"]}));
+    }
+    if let Some(mut child) = state.child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    #[cfg(target_os = "windows")]
+    if state.host_hwnd != 0 {
+        unsafe {
+            DestroyWindow(state.host_hwnd as HWND);
+        }
+        state.host_hwnd = 0;
+    }
+    state.pipe_name.clear();
+    state.episode_id = None;
+    Ok(())
+}
+
 #[tauri::command]
 fn capture_video_cover(
     episode_id: i64,
@@ -2635,6 +2941,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(db)
+        .manage(Mutex::new(MpvPlayerState::default()))
         .invoke_handler(tauri::generate_handler![
             get_works,
             get_works_sorted,
@@ -2657,6 +2964,11 @@ pub fn run() {
             update_work_cover,
             update_episode_cover,
             capture_video_cover,
+            start_embedded_mpv,
+            set_mpv_bounds,
+            mpv_command,
+            mpv_status,
+            stop_embedded_mpv,
             backup_database,
             restore_database,
             load_cover_cache,

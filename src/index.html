@@ -100,8 +100,8 @@
   .player-shell{width:min(1180px,100%);margin:0 auto;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;min-height:0;flex:1}
   .player-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
   .player-title{font-size:18px;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .player-stage{background:#111827;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:0;border:1px solid #0b1220}
-  .player-stage video{width:100%;height:100%;max-height:calc(100vh - 210px);object-fit:contain;background:#000}
+  .player-stage{background:#05070b;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:0;border:1px solid #0b1220;position:relative}
+  .mpv-host-hint{color:#7b8494;font-size:13px;pointer-events:none}
   .player-controls{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(15,23,42,0.05)}
   .player-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .player-row + .player-row{margin-top:12px}
@@ -278,8 +278,8 @@
           </div>
           <button class="btn-secondary" onclick="openPlayerExternal()">外部播放器</button>
         </div>
-        <div class="player-stage">
-          <video id="videoPlayer" controls playsinline preload="metadata"></video>
+        <div class="player-stage" id="mpvStage">
+          <div class="mpv-host-hint" id="mpvHint">mpv 播放器区域</div>
         </div>
         <div class="player-controls">
           <div class="player-row">
@@ -465,7 +465,9 @@ var state = {
   confirmResolver: null,
   player: {
     episode: null,
-    wasPlaying: false,
+    timer: null,
+    currentTime: 0,
+    duration: 0,
   },
   archive: {
     draft: null,
@@ -894,74 +896,91 @@ function currentPlayerEpisode() {
   return (state.currentDetail.episodes || []).find(function(e){ return e.id === state.player.episode.id; }) || state.player.episode;
 }
 
-function bindPlayerEvents() {
-  var video = document.getElementById('videoPlayer');
-  if (!video || video.dataset.bound) return;
-  video.dataset.bound = '1';
-  video.addEventListener('loadedmetadata', updatePlayerControls);
-  video.addEventListener('timeupdate', updatePlayerControls);
-  video.addEventListener('durationchange', updatePlayerControls);
-  video.addEventListener('error', function(){
-    playerMessage('err', '内置播放器无法解码此视频，可用外部播放器查看；截封面需要先能定位时间点。');
-  });
-}
-
 function updatePlayerControls() {
-  var video = document.getElementById('videoPlayer');
   var seek = document.getElementById('playerSeek');
   var time = document.getElementById('playerTime');
-  if (!video || !seek || !time) return;
-  var duration = Number.isFinite(video.duration) ? video.duration : 0;
-  var current = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  if (!seek || !time) return;
+  var duration = Number(state.player.duration) || 0;
+  var current = Number(state.player.currentTime) || 0;
   seek.max = duration || 0;
   seek.value = current || 0;
   time.textContent = formatTime(current) + ' / ' + formatTime(duration);
 }
 
-function openPlayer(episodeId) {
+function syncMpvBounds() {
+  var stage = document.getElementById('mpvStage');
+  if (!stage) return;
+  var rect = stage.getBoundingClientRect();
+  invoke('set_mpv_bounds', {
+    x: Math.round(rect.left),
+    y: Math.round(rect.top),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  }).catch(function(){});
+}
+
+function stopPlayerTimer() {
+  if (state.player.timer) {
+    clearInterval(state.player.timer);
+    state.player.timer = null;
+  }
+}
+
+async function pollMpvStatus() {
+  try {
+    var status = await invoke('mpv_status');
+    state.player.currentTime = status.time_seconds || 0;
+    state.player.duration = status.duration_seconds || state.player.duration || 0;
+    updatePlayerControls();
+  } catch(e) {}
+}
+
+async function openPlayer(episodeId) {
   var detail = state.currentDetail;
   if (!detail) return;
   var ep = (detail.episodes || []).find(function(item){ return item.id === episodeId; });
   if (!ep) return;
   state.player.episode = ep;
-  var video = document.getElementById('videoPlayer');
   document.getElementById('playerTitle').textContent = detail.work.title + ' / 第' + ep.number + '集';
-  playerMessage('', '');
-  bindPlayerEvents();
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
-  video.src = fileUrl(ep.video_path);
-  video.load();
+  document.getElementById('mpvHint').textContent = '正在启动 mpv...';
+  playerMessage('info', '正在启动 mpv 播放内核...');
   showPage('page-player');
+  syncMpvBounds();
+  stopPlayerTimer();
+  try {
+    await invoke('start_embedded_mpv', { episodeId: ep.id });
+    document.getElementById('mpvHint').textContent = '';
+    playerMessage('info', 'mpv 已启动');
+    syncMpvBounds();
+    await pollMpvStatus();
+    state.player.timer = setInterval(function(){
+      syncMpvBounds();
+      pollMpvStatus();
+    }, 500);
+  } catch(e) {
+    document.getElementById('mpvHint').textContent = 'mpv 未启动';
+    playerMessage('err', String(e));
+  }
 }
 
-function returnFromPlayer() {
-  var video = document.getElementById('videoPlayer');
-  if (video) video.pause();
+async function returnFromPlayer() {
+  stopPlayerTimer();
+  try { await invoke('stop_embedded_mpv'); } catch(e) {}
   showPage('page-detail');
 }
 
-function togglePlayerPlay() {
-  var video = document.getElementById('videoPlayer');
-  if (!video) return;
-  if (video.paused) video.play().catch(function(){});
-  else video.pause();
+async function togglePlayerPlay() {
+  try { await invoke('mpv_command', { action: 'toggle_pause', value: null }); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
 }
 
-function seekPlayer(delta) {
-  var video = document.getElementById('videoPlayer');
-  if (!video) return;
-  var duration = Number.isFinite(video.duration) ? video.duration : Number.MAX_SAFE_INTEGER;
-  video.currentTime = Math.max(0, Math.min(duration, (video.currentTime || 0) + delta));
-  updatePlayerControls();
+async function seekPlayer(delta) {
+  try { await invoke('mpv_command', { action: 'seek_relative', value: delta }); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
 }
 
-function seekPlayerTo(value) {
-  var video = document.getElementById('videoPlayer');
-  if (!video) return;
-  video.currentTime = Math.max(0, Number(value) || 0);
+async function seekPlayerTo(value) {
+  state.player.currentTime = Math.max(0, Number(value) || 0);
   updatePlayerControls();
+  try { await invoke('mpv_command', { action: 'seek_absolute', value: state.player.currentTime }); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
 }
 
 async function playEpisode(videoPath) {
@@ -976,9 +995,9 @@ async function openPlayerExternal() {
 
 async function captureCurrentFrame(target) {
   var ep = currentPlayerEpisode();
-  var video = document.getElementById('videoPlayer');
-  if (!ep || !video) return;
-  var time = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+  if (!ep) return;
+  await pollMpvStatus();
+  var time = Number(state.player.currentTime) || 0;
   playerMessage('info', '正在截取 ' + formatTime(time) + '...');
   try {
     var result = await invoke('capture_video_cover', { episodeId: ep.id, timeSeconds: time, target: target });
@@ -1488,6 +1507,10 @@ var resizeTimer = null;
 window.addEventListener('resize', function(){
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(function(){
+    if (document.getElementById('page-player').classList.contains('active')) {
+      syncMpvBounds();
+      return;
+    }
     if (!document.getElementById('page-home').classList.contains('active')) return;
     if (updatePageSize(true)) applyFilter();
   }, 80);
