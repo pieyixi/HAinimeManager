@@ -344,22 +344,12 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         .map_err(|e| e.to_string())?;
         let ep_id: i64 = conn.last_insert_rowid();
 
-        // Episode cover: data/cover_epN.png or data/作品名_cover_epN.png
-        for ext in ["png", "jpg", "jpeg"] {
-            let candidates = [
-                data_dir.join(format!("cover_ep{}.{}", num, ext)),
-                data_dir.join(format!("{}_cover_ep{}.{}", dir_name, num, ext)),
-            ];
-            for ec in &candidates {
-                if ec.exists() {
-                    conn.execute(
-                        "UPDATE Episodes SET CoverPath=?1 WHERE Id=?2",
-                        params![ec.to_string_lossy().to_string(), ep_id],
-                    )
-                    .ok();
-                    break;
-                }
-            }
+        if let Some(cover_path) = find_import_cover(&data_dir, &dir_name, &format!("cover_ep{}", num)) {
+            conn.execute(
+                "UPDATE Episodes SET CoverPath=?1 WHERE Id=?2",
+                params![cover_path, ep_id],
+            )
+            .ok();
         }
 
         // Episode-level tags (theme->剧情, attribute->属性, scene->场景)
@@ -393,22 +383,12 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         }
     }
 
-    // Work cover: data/cover.jpg or data/作品名_cover.jpg
-    for ext in ["jpg", "png", "jpeg"] {
-        let candidates = [
-            data_dir.join(format!("cover.{}", ext)),
-            data_dir.join(format!("{}_cover.{}", dir_name, ext)),
-        ];
-        for cp in &candidates {
-            if cp.exists() {
-                conn.execute(
-                    "UPDATE Works SET CoverPath=?1 WHERE Id=?2",
-                    params![cp.to_string_lossy().to_string(), work_id],
-                )
-                .ok();
-                break;
-            }
-        }
+    if let Some(cover_path) = find_import_cover(&data_dir, &dir_name, "cover") {
+        conn.execute(
+            "UPDATE Works SET CoverPath=?1 WHERE Id=?2",
+            params![cover_path, work_id],
+        )
+        .ok();
     }
 
     // Work-level tags (thm->剧情, atb->属性, scn->场景, std->制作)
@@ -817,8 +797,32 @@ fn write_image_data(
     std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
     let ext = image_ext_from_data(&data);
     let out_path = data_dir.join(format!("{}.{}", stem, ext));
+    for old_ext in ["jpg", "jpeg", "png", "webp"] {
+        let old_path = data_dir.join(format!("{}.{}", stem, old_ext));
+        if old_path != out_path && old_path.exists() {
+            let _ = std::fs::remove_file(old_path);
+        }
+    }
     std::fs::write(&out_path, data).map_err(|e| e.to_string())?;
     Ok(out_path.to_string_lossy().to_string())
+}
+
+fn find_import_cover(
+    data_dir: &std::path::Path,
+    dir_name: &str,
+    stem: &str,
+) -> Option<String> {
+    for ext in ["jpg", "jpeg", "png", "webp"] {
+        for candidate in [
+            data_dir.join(format!("{}.{}", stem, ext)),
+            data_dir.join(format!("{}_{}.{}", dir_name, stem, ext)),
+        ] {
+            if candidate.exists() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+    None
 }
 
 fn make_archive_draft(
@@ -934,13 +938,35 @@ fn inspect_archive_folder(dir_path: String, title: Option<String>) -> Result<Arc
 }
 
 #[tauri::command]
-fn save_archive_cover(input: ArchiveCoverSaveInput) -> Result<String, String> {
+fn save_archive_cover(input: ArchiveCoverSaveInput, db: State<Database>) -> Result<String, String> {
     let data_dir = std::path::Path::new(&input.dir_path).join("data");
     let stem = input
         .episode_id
         .map(|id| format!("cover_ep{}", id))
         .unwrap_or_else(|| "cover".to_string());
-    write_image_data(&data_dir, &stem, &input.image_data)
+    let cover_path = write_image_data(&data_dir, &stem, &input.image_data)?;
+    if let Ok(conn) = db.conn.lock() {
+        if let Ok(work_id) = conn.query_row(
+            "SELECT Id FROM Works WHERE lower(FolderPath) = lower(?1) LIMIT 1",
+            params![input.dir_path],
+            |r| r.get::<_, i64>(0),
+        ) {
+            if let Some(episode_number) = input.episode_id {
+                conn.execute(
+                    "UPDATE Episodes SET CoverPath=?1 WHERE WorkId=?2 AND Number=?3",
+                    params![cover_path, work_id, episode_number],
+                )
+                .ok();
+            } else {
+                conn.execute(
+                    "UPDATE Works SET CoverPath=?1, UpdatedAt=datetime('now','localtime') WHERE Id=?2",
+                    params![cover_path, work_id],
+                )
+                .ok();
+            }
+        }
+    }
+    Ok(cover_path)
 }
 
 #[tauri::command]
