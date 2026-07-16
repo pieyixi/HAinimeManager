@@ -196,7 +196,7 @@
         <div class="toolbar-spacer"></div>
         <div class="search-box">
           <span class="search-icon">&#128269;</span>
-          <input type="text" placeholder="搜索标题、简介、制作商、Tag" id="searchInput" oninput="applyFilter()">
+          <input type="text" placeholder="搜索标题、简介、制作商、Tag" id="searchInput" autocomplete="off" autocapitalize="off" spellcheck="false" oninput="applyFilter()">
           <span class="search-result-count" id="resultCount"></span>
           <button class="search-clear" id="searchClear" onclick="clearSearch()">清除</button>
         </div>
