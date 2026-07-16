@@ -105,7 +105,7 @@
   .player-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
   .player-title{font-size:18px;font-weight:700;color:#111827;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .player-stage{background:#05070b;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:0;border:1px solid #0b1220;position:relative}
-  body.player-mode .player-stage{background:transparent;border-color:rgba(11,18,32,0.42)}
+  body.player-mode .player-stage{background:transparent;border-color:transparent;border-radius:0}
   .mpv-host-hint{color:#7b8494;font-size:13px;pointer-events:none}
   .player-controls{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(15,23,42,0.05)}
   .player-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
@@ -529,7 +529,7 @@ function updatePageSize(preservePosition) {
 function showPage(id) {
   document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
   document.getElementById(id).classList.add('active');
-  document.body.classList.toggle('player-mode', id === 'page-player');
+  if (id !== 'page-player') document.body.classList.remove('player-mode');
 }
 
 function showHome() {
@@ -966,13 +966,14 @@ async function syncMpvBounds() {
   var height = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
   updatePlayerMasks(rect, width, height);
   if (!state.player.libmpvReady) return;
+  var bleed = 2;
   await mpvPlugin('set_video_margin_ratio', {
     windowLabel: 'main',
     ratio: {
-      left: Math.max(0, rect.left / width),
-      right: Math.max(0, (width - rect.right) / width),
-      top: Math.max(0, rect.top / height),
-      bottom: Math.max(0, (height - rect.bottom) / height),
+      left: Math.max(0, (rect.left - bleed) / width),
+      right: Math.max(0, (width - rect.right - bleed) / width),
+      top: Math.max(0, (rect.top - bleed) / height),
+      bottom: Math.max(0, (height - rect.bottom - bleed) / height),
     },
   }).catch(function(){});
 }
@@ -987,10 +988,11 @@ function updatePlayerMasks(rect, width, height) {
   var t = Math.max(0, Math.round(rect.top));
   var r = Math.min(width, Math.round(rect.right));
   var b = Math.min(height, Math.round(rect.bottom));
-  top.style.cssText = 'left:0;top:0;width:' + width + 'px;height:' + Math.max(0, t - 1) + 'px';
-  bottom.style.cssText = 'left:0;top:' + (b + 1) + 'px;width:' + width + 'px;height:' + Math.max(0, height - b - 1) + 'px';
-  left.style.cssText = 'left:0;top:' + t + 'px;width:' + Math.max(0, l - 1) + 'px;height:' + Math.max(0, b - t) + 'px';
-  right.style.cssText = 'left:' + (r + 1) + 'px;top:' + t + 'px;width:' + Math.max(0, width - r - 1) + 'px;height:' + Math.max(0, b - t) + 'px';
+  var overlap = 2;
+  top.style.cssText = 'left:0;top:0;width:' + width + 'px;height:' + Math.max(0, t + overlap) + 'px';
+  bottom.style.cssText = 'left:0;top:' + Math.max(0, b - overlap) + 'px;width:' + width + 'px;height:' + Math.max(0, height - b + overlap) + 'px';
+  left.style.cssText = 'left:0;top:' + t + 'px;width:' + Math.max(0, l + overlap) + 'px;height:' + Math.max(0, b - t) + 'px';
+  right.style.cssText = 'left:' + Math.max(0, r - overlap) + 'px;top:' + t + 'px;width:' + Math.max(0, width - r + overlap) + 'px;height:' + Math.max(0, b - t) + 'px';
 }
 
 function stopPlayerTimer() {
@@ -1016,6 +1018,10 @@ async function safeMpvGetProperty(name, format) {
   try { return await mpvGetProperty(name, format); } catch(e) { return null; }
 }
 
+function delay(ms) {
+  return new Promise(function(resolve){ setTimeout(resolve, ms); });
+}
+
 async function openPlayer(episodeId) {
   var detail = state.currentDetail;
   if (!detail) return;
@@ -1035,9 +1041,11 @@ async function openPlayer(episodeId) {
     state.player.currentTime = 0;
     state.player.duration = 0;
     updatePlayerControls();
+    await delay(140);
+    document.body.classList.add('player-mode');
+    await syncMpvBounds();
     document.getElementById('mpvHint').textContent = '';
     playerMessage('info', 'libmpv 已启动');
-    await syncMpvBounds();
     await setPlayerVolume(document.getElementById('playerVolume').value);
     await updateMuteFromMpv();
     await pollMpvStatus();
