@@ -136,12 +136,6 @@ pub struct ArchiveCoverSaveInput {
 }
 
 #[derive(Debug, Serialize)]
-pub struct CapturedCover {
-    pub cover_path: String,
-    pub target: String,
-}
-
-#[derive(Debug, Serialize)]
 pub struct CapturedFrameData {
     pub image_data: String,
 }
@@ -149,13 +143,6 @@ pub struct CapturedFrameData {
 #[derive(Debug, Serialize)]
 pub struct CapturePath {
     pub path: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CoverCaptureInput {
-    pub episode_id: i64,
-    pub target: String,
-    pub cover_path: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -2375,109 +2362,6 @@ fn update_episode_cover(
 }
 
 #[tauri::command]
-fn prepare_video_cover_capture(
-    episode_id: i64,
-    target: String,
-    db: State<Database>,
-) -> Result<CapturedCover, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let folder_path: String = conn
-        .query_row(
-            "SELECT w.FolderPath
-             FROM Episodes e
-             INNER JOIN Works w ON e.WorkId = w.Id
-             WHERE e.Id = ?1",
-            params![episode_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    let data_dir = std::path::Path::new(&folder_path).join("data");
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-
-    let normalized_target = if target == "work" { "work" } else { "episode" };
-    let temp_dir = portable_app_dir().join("temp");
-    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
-    Ok(CapturedCover {
-        cover_path: temp_dir
-            .join(format!(
-                "mpv_cover_{}_{}_{}.jpg",
-                episode_id,
-                normalized_target,
-                chrono_like_millis()
-            ))
-            .to_string_lossy()
-            .to_string(),
-        target: normalized_target.to_string(),
-    })
-}
-
-#[tauri::command]
-fn finalize_video_cover_capture(
-    input: CoverCaptureInput,
-    db: State<Database>,
-) -> Result<CapturedCover, String> {
-    let temp_path = std::path::PathBuf::from(&input.cover_path);
-    if !temp_path.is_file() {
-        return Err("截图文件不存在".to_string());
-    }
-
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (work_id, episode_number, folder_path): (i64, i32, String) = conn
-        .query_row(
-            "SELECT e.WorkId, e.Number, w.FolderPath
-             FROM Episodes e
-             INNER JOIN Works w ON e.WorkId = w.Id
-             WHERE e.Id = ?1",
-            params![input.episode_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .map_err(|e| e.to_string())?;
-
-    let normalized_target = if input.target == "work" {
-        "work"
-    } else {
-        "episode"
-    };
-    let data_dir = std::path::Path::new(&folder_path).join("data");
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    let final_path = if normalized_target == "work" {
-        data_dir.join("cover.jpg")
-    } else {
-        data_dir.join(format!("cover_ep{}.jpg", episode_number))
-    };
-    std::fs::copy(&temp_path, &final_path).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_file(&temp_path);
-
-    let stem = if normalized_target == "work" {
-        "cover".to_string()
-    } else {
-        format!("cover_ep{}", episode_number)
-    };
-    remove_cover_alternates(&data_dir, &stem, &final_path);
-
-    let cover_path = final_path.to_string_lossy().to_string();
-    if normalized_target == "work" {
-        conn.execute(
-            "UPDATE Works SET CoverPath=?1, UpdatedAt=datetime('now','localtime') WHERE Id=?2",
-            params![cover_path, work_id],
-        )
-        .map_err(|e| e.to_string())?;
-    } else {
-        conn.execute(
-            "UPDATE Episodes SET CoverPath=?1 WHERE Id=?2",
-            params![cover_path, input.episode_id],
-        )
-        .map_err(|e| e.to_string())?;
-    }
-
-    Ok(CapturedCover {
-        cover_path,
-        target: normalized_target.to_string(),
-    })
-}
-
-#[tauri::command]
 fn prepare_temp_frame_capture() -> Result<CapturePath, String> {
     let dir = portable_app_dir().join("temp");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -2783,8 +2667,6 @@ pub fn run() {
             batch_import_folders,
             update_work_cover,
             update_episode_cover,
-            prepare_video_cover_capture,
-            finalize_video_cover_capture,
             prepare_temp_frame_capture,
             read_image_data,
             backup_database,
