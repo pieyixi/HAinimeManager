@@ -1,3 +1,38 @@
+fn normalize_title_for_duplicate(title: &str) -> String {
+    title
+        .to_lowercase()
+        .chars()
+        .filter(|c| {
+            !c.is_whitespace() && !matches!(c, '-' | '_' | '[' | ']' | '(' | ')' | '（' | '）')
+        })
+        .collect()
+}
+
+fn folder_video_stats(folder_path: &str) -> (i32, u64) {
+    let mut count = 0;
+    let mut total = 0;
+    if let Ok(entries) = std::fs::read_dir(folder_path) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_file() && is_video_file(&p) {
+                count += 1;
+                total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+            }
+        }
+    }
+    (count, total)
+}
+
+fn duplicate_signature(title: &str, video_count: i32, total_size: u64) -> String {
+    let normalized = normalize_title_for_duplicate(title);
+    let size_bucket = if total_size > 0 {
+        total_size / 1_048_576
+    } else {
+        0
+    };
+    format!("{}|{}|{}", normalized, video_count, size_bucket)
+}
+
 #[tauri::command]
 fn detect_duplicates(
     root_path: String,

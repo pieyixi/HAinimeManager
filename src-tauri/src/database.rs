@@ -17,10 +17,6 @@ fn legacy_app_data_dir() -> std::path::PathBuf {
     std::path::Path::new(&app_data).join("HAnimeManager")
 }
 
-fn portable_cache_dir(kind: &str) -> std::path::PathBuf {
-    portable_app_dir().join("cache").join(kind)
-}
-
 fn get_db_path() -> String {
     let dir = portable_app_dir();
     std::fs::create_dir_all(&dir).ok();

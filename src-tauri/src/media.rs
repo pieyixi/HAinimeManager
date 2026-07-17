@@ -66,52 +66,6 @@ fn play_video(video_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn add_new_tag(name: String, category: String, db: State<Database>) -> Result<i64, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let name = name.trim().to_string();
-    if name.is_empty() {
-        return Err("Tag名称不能为空".to_string());
-    }
-    conn.execute(
-        "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)",
-        params![name, category],
-    )
-    .map_err(|e| e.to_string())?;
-    let id: i64 = conn
-        .query_row("SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| {
-            r.get(0)
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(id)
-}
-
-#[tauri::command]
-fn delete_tag(tag_id: i64, db: State<Database>) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM WorkTags WHERE TagId = ?1", params![tag_id])
-        .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM Tags WHERE Id = ?1", params![tag_id])
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-fn update_tag(
-    tag_id: i64,
-    name: String,
-    category: String,
-    db: State<Database>,
-) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE Tags SET Name = ?1, Category = ?2 WHERE Id = ?3",
-        params![name, category, tag_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
 fn get_years(db: State<Database>) -> Result<Vec<i32>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn

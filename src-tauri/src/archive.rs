@@ -167,6 +167,18 @@ fn decode_data_url(input: &str) -> Vec<u8> {
     base64_decode(data)
 }
 
+fn base64_decode(input: &str) -> Vec<u8> {
+    let input = input
+        .trim()
+        .replace('\n', "")
+        .replace('\r', "")
+        .replace(' ', "");
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(&input)
+        .unwrap_or_default()
+}
+
 fn write_image_data(
     data_dir: &std::path::Path,
     stem: &str,

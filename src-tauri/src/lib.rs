@@ -1,8 +1,6 @@
 include!("models.rs");
 include!("import.rs");
-include!("metadata.rs");
 include!("archive.rs");
-include!("scrape.rs");
 include!("duplicates.rs");
 include!("database.rs");
 include!("library.rs");

@@ -147,23 +147,6 @@ pub struct CapturePath {
     pub path: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ImageCandidate {
-    pub source: String,
-    pub url: String,
-}
-
-#[derive(Debug, Serialize, Default)]
-pub struct ArchiveScrapeResult {
-    pub title: Option<String>,
-    pub release_date: Option<String>,
-    pub studio: Option<String>,
-    pub synopsis: Option<String>,
-    pub cover_candidates: Vec<ImageCandidate>,
-    pub raw_tags: Vec<String>,
-    pub tags: ArchiveEpisodeTags,
-}
-
 #[derive(Debug, Serialize, Clone)]
 pub struct DuplicateItem {
     pub title: String,

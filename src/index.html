@@ -53,6 +53,7 @@
   .year-list{display:flex;flex-direction:column;gap:6px;border-right:1px solid var(--line);padding-right:10px;max-height:260px;overflow:auto}
   .year-option{height:28px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12px;color:#4b5563;cursor:pointer}
   .year-option.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary)}
+  .year-option.selected{border-color:var(--primary);background:var(--primary);color:#fff}
   .month-panel{min-width:0}
   .month-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
   .month-cell{height:30px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12px;color:#4b5563;cursor:pointer}
@@ -87,8 +88,6 @@
   .detail-main{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:22px 24px}
   .detail-episodes{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
   .detail-title{font-size:26px;font-weight:700;color:#111827;margin-bottom:12px;line-height:1.25}
-  .detail-meta-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
-  .detail-date,.detail-studio{font-size:12px;color:#4b5563;background:#f3f6fa;border:1px solid var(--line);border-radius:999px;padding:5px 10px;margin:0}
   .detail-tags{display:flex;flex-direction:column;gap:9px;margin-bottom:16px}
   .detail-tag-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
   .detail-tag-row.jumpable{padding-top:9px;border-top:1px solid var(--line)}
@@ -180,11 +179,6 @@
   .drop-zone.small{width:112px;height:63px;min-height:63px;border-radius:7px;flex-shrink:0}
   .drop-zone.dragover{border-color:var(--primary);background:var(--primary-soft)}
   .drop-zone img{width:100%;height:100%;object-fit:cover;display:block}
-  .candidate-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}
-  .candidate{border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;background:#fff}
-  .candidate.selected{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,0.12)}
-  .candidate img{width:100%;aspect-ratio:3/4;object-fit:cover;background:#eef1f5;display:block}
-  .candidate div{font-size:11px;color:var(--muted);padding:5px 7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .episode-editor{display:flex;gap:14px;padding:12px;border:1px solid var(--line);border-radius:12px;margin-bottom:10px;background:#fbfcfd}
   .episode-editor-main{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:10px}
   .episode-tags{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
@@ -442,8 +436,6 @@
             <div class="archive-label">简介</div>
             <textarea class="archive-textarea" id="archiveSynopsis"></textarea>
           </div>
-          <div class="tag-preview" id="scrapedTags"></div>
-
           <div style="height:16px"></div>
           <div class="archive-section-title">集数与封面</div>
           <div id="archiveEpisodes"></div>
@@ -727,7 +719,8 @@ function renderYearDropdown(dd) {
   var html = '<div class="year-list">';
   years.forEach(function(y){
     var yearSelected = state.activeFilters.year && state.activeFilters.year[String(y)];
-    html += '<button class="year-option' + (String(y) === selectedYear || yearSelected ? ' active' : '') + '" onclick="toggleWholeYear(' + y + ')">' + y + '年</button>';
+    var classes = 'year-option' + (String(y) === selectedYear ? ' active' : '') + (yearSelected ? ' selected' : '');
+    html += '<button class="' + classes + '" onclick="toggleWholeYear(' + y + ')">' + y + '年</button>';
   });
   html += '</div><div class="month-panel"><div class="dd-header">' + selectedYear + '年</div>';
   html += '<div class="month-grid">';
@@ -988,14 +981,12 @@ async function showDetail(id) {
     var attrTags = tags.filter(function(t){ return t.category === '属性'; });
     var sceneTags = tags.filter(function(t){ return t.category === '场景'; });
 
-    var releaseDates = episodes.map(function(e, index){
-      var episodeNumber = Number(e.number) || (index + 1);
-      var date = e.release_date || (w.year + '-' + String(w.month).padStart(2,'0'));
-      return { number: episodeNumber, date: date };
+    var releaseDates = episodes.map(function(e){
+      return e.release_date || (w.year + '-' + String(w.month).padStart(2,'0'));
     });
     var tagHtml = '<div class="detail-tag-row"><span class="detail-section-title">年份</span>';
-    releaseDates.forEach(function(item){
-      tagHtml += '<span class="detail-tag">第 ' + String(item.number).padStart(2, '0') + ' 集 ' + escHtml(item.date) + '</span>';
+    releaseDates.forEach(function(date){
+      tagHtml += '<span class="detail-tag">' + escHtml(date) + '</span>';
     });
     tagHtml += '</div>';
     if (chars.length > 0) tagHtml += renderDetailTagRow('角色', chars, null, false);
@@ -1478,7 +1469,6 @@ function openArchiveAssistant(dirPath) {
   document.getElementById('archiveCharacters').value = '';
   document.getElementById('archiveSynopsis').value = '';
   document.getElementById('archiveEpisodes').innerHTML = '';
-  document.getElementById('scrapedTags').innerHTML = '';
   document.getElementById('archiveCoverDrop').innerHTML = '拖入主封面';
   document.getElementById('archiveMsg').innerHTML = '';
   document.getElementById('archiveJsonPaste').value = '';
