@@ -147,6 +147,18 @@ pub struct CapturedFrameData {
 }
 
 #[derive(Debug, Serialize)]
+pub struct CapturePath {
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CoverCaptureInput {
+    pub episode_id: i64,
+    pub target: String,
+    pub cover_path: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ImageCandidate {
     pub source: String,
     pub url: String,
@@ -797,14 +809,18 @@ fn write_image_data(
     std::fs::create_dir_all(data_dir).map_err(|e| e.to_string())?;
     let ext = image_ext_from_data(&data);
     let out_path = data_dir.join(format!("{}.{}", stem, ext));
+    remove_cover_alternates(data_dir, stem, &out_path);
+    std::fs::write(&out_path, data).map_err(|e| e.to_string())?;
+    Ok(out_path.to_string_lossy().to_string())
+}
+
+fn remove_cover_alternates(data_dir: &std::path::Path, stem: &str, keep_path: &std::path::Path) {
     for old_ext in ["jpg", "jpeg", "png", "webp"] {
         let old_path = data_dir.join(format!("{}.{}", stem, old_ext));
-        if old_path != out_path && old_path.exists() {
+        if old_path != keep_path && old_path.exists() {
             let _ = std::fs::remove_file(old_path);
         }
     }
-    std::fs::write(&out_path, data).map_err(|e| e.to_string())?;
-    Ok(out_path.to_string_lossy().to_string())
 }
 
 fn find_import_cover(
@@ -2358,77 +2374,89 @@ fn update_episode_cover(
     Ok(cover_path)
 }
 
-fn ffmpeg_path() -> String {
-    std::env::var("FFMPEG_PATH").unwrap_or_else(|_| {
-        let portable = portable_app_dir().join("bin").join("ffmpeg.exe");
-        if portable.exists() {
-            return portable.to_string_lossy().to_string();
-        }
-        let bundled = r"D:\Envirnment\ffmpeg\bin\ffmpeg.exe";
-        if std::path::Path::new(bundled).exists() {
-            bundled.to_string()
-        } else {
-            "ffmpeg".to_string()
-        }
-    })
-}
-
 #[tauri::command]
-fn capture_video_cover(
+fn prepare_video_cover_capture(
     episode_id: i64,
-    time_seconds: f64,
     target: String,
     db: State<Database>,
 ) -> Result<CapturedCover, String> {
-    if !time_seconds.is_finite() || time_seconds < 0.0 {
-        return Err("截帧时间无效".to_string());
-    }
-
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (work_id, episode_number, video_path, folder_path): (i64, i32, String, String) = conn
+    let folder_path: String = conn
         .query_row(
-            "SELECT e.WorkId, e.Number, e.VideoPath, w.FolderPath
+            "SELECT w.FolderPath
              FROM Episodes e
              INNER JOIN Works w ON e.WorkId = w.Id
              WHERE e.Id = ?1",
             params![episode_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| row.get(0),
         )
         .map_err(|e| e.to_string())?;
-
-    if !std::path::Path::new(&video_path).is_file() {
-        return Err("视频文件不存在".to_string());
-    }
 
     let data_dir = std::path::Path::new(&folder_path).join("data");
     std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
 
     let normalized_target = if target == "work" { "work" } else { "episode" };
-    let out_path = if normalized_target == "work" {
+    let temp_dir = portable_app_dir().join("temp");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+    Ok(CapturedCover {
+        cover_path: temp_dir
+            .join(format!(
+                "mpv_cover_{}_{}_{}.jpg",
+                episode_id,
+                normalized_target,
+                chrono_like_millis()
+            ))
+            .to_string_lossy()
+            .to_string(),
+        target: normalized_target.to_string(),
+    })
+}
+
+#[tauri::command]
+fn finalize_video_cover_capture(
+    input: CoverCaptureInput,
+    db: State<Database>,
+) -> Result<CapturedCover, String> {
+    let temp_path = std::path::PathBuf::from(&input.cover_path);
+    if !temp_path.is_file() {
+        return Err("截图文件不存在".to_string());
+    }
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let (work_id, episode_number, folder_path): (i64, i32, String) = conn
+        .query_row(
+            "SELECT e.WorkId, e.Number, w.FolderPath
+             FROM Episodes e
+             INNER JOIN Works w ON e.WorkId = w.Id
+             WHERE e.Id = ?1",
+            params![input.episode_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| e.to_string())?;
+
+    let normalized_target = if input.target == "work" {
+        "work"
+    } else {
+        "episode"
+    };
+    let data_dir = std::path::Path::new(&folder_path).join("data");
+    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+    let final_path = if normalized_target == "work" {
         data_dir.join("cover.jpg")
     } else {
         data_dir.join(format!("cover_ep{}.jpg", episode_number))
     };
+    std::fs::copy(&temp_path, &final_path).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&temp_path);
 
-    let status = std::process::Command::new(ffmpeg_path())
-        .arg("-y")
-        .arg("-ss")
-        .arg(format!("{:.3}", time_seconds))
-        .arg("-i")
-        .arg(&video_path)
-        .arg("-frames:v")
-        .arg("1")
-        .arg("-q:v")
-        .arg("2")
-        .arg(&out_path)
-        .status()
-        .map_err(|e| format!("启动 ffmpeg 失败: {}", e))?;
+    let stem = if normalized_target == "work" {
+        "cover".to_string()
+    } else {
+        format!("cover_ep{}", episode_number)
+    };
+    remove_cover_alternates(&data_dir, &stem, &final_path);
 
-    if !status.success() || !out_path.exists() {
-        return Err("ffmpeg 截帧失败".to_string());
-    }
-
-    let cover_path = out_path.to_string_lossy().to_string();
+    let cover_path = final_path.to_string_lossy().to_string();
     if normalized_target == "work" {
         conn.execute(
             "UPDATE Works SET CoverPath=?1, UpdatedAt=datetime('now','localtime') WHERE Id=?2",
@@ -2438,7 +2466,7 @@ fn capture_video_cover(
     } else {
         conn.execute(
             "UPDATE Episodes SET CoverPath=?1 WHERE Id=?2",
-            params![cover_path, episode_id],
+            params![cover_path, input.episode_id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -2450,38 +2478,27 @@ fn capture_video_cover(
 }
 
 #[tauri::command]
-fn capture_archive_frame_data(
-    video_path: String,
-    time_seconds: f64,
-) -> Result<CapturedFrameData, String> {
+fn prepare_temp_frame_capture() -> Result<CapturePath, String> {
+    let dir = portable_app_dir().join("temp");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(CapturePath {
+        path: dir
+            .join(format!(
+                "mpv_frame_{}_{}.jpg",
+                std::process::id(),
+                chrono_like_millis()
+            ))
+            .to_string_lossy()
+            .to_string(),
+    })
+}
+
+#[tauri::command]
+fn read_image_data(path: String) -> Result<CapturedFrameData, String> {
     use base64::Engine as _;
-    if !time_seconds.is_finite() || time_seconds < 0.0 {
-        return Err("截帧时间无效".to_string());
-    }
-    if !std::path::Path::new(&video_path).is_file() {
-        return Err("视频文件不存在".to_string());
-    }
-    let temp_path = std::env::temp_dir().join(format!(
-        "hanime_archive_frame_{}_{}.jpg",
-        std::process::id(),
-        chrono_like_millis()
-    ));
-    let status = std::process::Command::new(ffmpeg_path())
-        .arg("-y")
-        .arg("-ss")
-        .arg(format!("{:.3}", time_seconds))
-        .arg("-i")
-        .arg(&video_path)
-        .arg("-frames:v")
-        .arg("1")
-        .arg("-q:v")
-        .arg("2")
-        .arg(&temp_path)
-        .status()
-        .map_err(|e| format!("启动 ffmpeg 失败: {}", e))?;
-    if !status.success() || !temp_path.exists() {
-        let _ = std::fs::remove_file(&temp_path);
-        return Err("ffmpeg 截帧失败".to_string());
+    let temp_path = std::path::PathBuf::from(path);
+    if !temp_path.is_file() {
+        return Err("图片文件不存在".to_string());
     }
     let data = std::fs::read(&temp_path).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&temp_path);
@@ -2766,8 +2783,10 @@ pub fn run() {
             batch_import_folders,
             update_work_cover,
             update_episode_cover,
-            capture_video_cover,
-            capture_archive_frame_data,
+            prepare_video_cover_capture,
+            finalize_video_cover_capture,
+            prepare_temp_frame_capture,
+            read_image_data,
             backup_database,
             restore_database,
             load_cover_cache,

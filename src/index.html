@@ -308,6 +308,8 @@
           <div class="player-row">
             <button class="btn-secondary" id="muteBtn" onclick="toggleMute()">静音</button>
             <input class="volume-range" id="playerVolume" type="range" min="0" max="100" step="1" value="80" oninput="setPlayerVolume(this.value)">
+            <button class="btn-secondary" onclick="captureCurrentFrame('episode')">设为本集封面</button>
+            <button class="btn-secondary" onclick="captureCurrentFrame('work')">设为主封面</button>
             <span class="player-msg" id="playerMsg"></span>
           </div>
         </div>
@@ -1053,6 +1055,11 @@ async function safeMpvGetProperty(name, format) {
   try { return await mpvGetProperty(name, format); } catch(e) { return null; }
 }
 
+async function mpvScreenshotToFile(path) {
+  await delay(80);
+  await mpvCommand('screenshot-to-file', [path, 'video']);
+}
+
 function delay(ms) {
   return new Promise(function(resolve){ setTimeout(resolve, ms); });
 }
@@ -1105,10 +1112,20 @@ async function returnFromPlayer() {
   var mode = state.player.mode;
   if (mode === 'archive' && ep) {
     await pollMpvStatus();
+    var imageData = null;
+    try {
+      var temp = await invoke('prepare_temp_frame_capture');
+      await mpvScreenshotToFile(temp.path);
+      var captured = await invoke('read_image_data', { path: temp.path });
+      imageData = captured.image_data;
+    } catch(e) {
+      playerMessage('err', '保存当前帧失败: ' + (e.message || e));
+    }
     state.archive.lastFrame = {
       videoPath: ep.video_path,
       episodeId: ep.id || ep.number || null,
       time: Number(state.player.currentTime) || 0,
+      imageData: imageData,
     };
   }
   try { await mpvPlugin('destroy', { windowLabel: 'main' }); } catch(e) {}
@@ -1183,7 +1200,34 @@ async function captureCurrentFrame(target) {
   var time = Number(state.player.currentTime) || 0;
   playerMessage('info', '正在截取 ' + formatTime(time) + '...');
   try {
-    var result = await invoke('capture_video_cover', { episodeId: ep.id, timeSeconds: time, target: target });
+    if (state.player.mode === 'archive') {
+      var temp = await invoke('prepare_temp_frame_capture');
+      await mpvScreenshotToFile(temp.path);
+      var captured = await invoke('read_image_data', { path: temp.path });
+      var dirPath = document.getElementById('archiveDir').value.trim();
+      var episodeId = target === 'work' ? null : Number(ep.id || ep.number);
+      var savedPath = await invoke('save_archive_cover', {
+        input: { dir_path: dirPath, image_data: captured.image_data, episode_id: episodeId }
+      });
+      if (target === 'work') {
+        state.archive.coverData = captured.image_data;
+        if (state.archive.draft) state.archive.draft.cover_path = savedPath;
+      } else {
+        state.archive.episodeCoverData[String(episodeId)] = captured.image_data;
+        if (state.archive.draft) {
+          var archiveEp = state.archive.draft.episode_list.find(function(item){ return Number(item.id) === Number(episodeId); });
+          if (archiveEp) archiveEp.cover_path = savedPath;
+        }
+      }
+      await reloadCoverCache(savedPath);
+      playerMessage('info', target === 'work' ? '已截为主封面' : '已截为本集封面');
+      return;
+    }
+    var prepared = await invoke('prepare_video_cover_capture', { episodeId: ep.id, target: target });
+    await mpvScreenshotToFile(prepared.cover_path);
+    var result = await invoke('finalize_video_cover_capture', {
+      input: { episode_id: ep.id, target: target, cover_path: prepared.cover_path }
+    });
     delete state.coverCache[result.cover_path];
     await loadCovers([result.cover_path]);
     if (target === 'work' && state.currentDetail && state.currentDetail.work) {
@@ -1478,14 +1522,19 @@ async function playSelectedArchiveEpisodeForCover() {
 }
 
 async function captureArchiveFrameToData(videoPath, time) {
-  var result = await invoke('capture_archive_frame_data', { videoPath: videoPath, timeSeconds: time });
-  return result.image_data;
+  var last = state.archive.lastFrame;
+  if (!last || !last.imageData) throw new Error('没有可用的当前帧，请重新播放取帧后返回');
+  return last.imageData;
 }
 
 function archiveLastFrameFor(epId) {
   var last = state.archive.lastFrame;
   if (!last) {
     showArchiveMsg('err', '请先从建档页播放视频，拖到要截取的位置后返回');
+    return null;
+  }
+  if (!last.imageData) {
+    showArchiveMsg('err', '返回播放器时没有截到当前帧，请重新播放取帧后返回');
     return null;
   }
   if (epId && Number(last.episodeId) !== Number(epId)) {
