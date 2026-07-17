@@ -26,6 +26,7 @@ pub struct Episode {
     pub title: String,
     pub video_path: String,
     pub cover_path: Option<String>,
+    pub release_date: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -1868,7 +1869,7 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
         "SELECT Id, WorkId, Number, Title, VideoPath, CoverPath FROM Episodes WHERE WorkId = ?1 ORDER BY Number"
     ).map_err(|e| e.to_string())?;
 
-    let episodes = ep_stmt
+    let mut episodes: Vec<Episode> = ep_stmt
         .query_map(params![work_id], |row| {
             Ok(Episode {
                 id: row.get(0)?,
@@ -1877,11 +1878,37 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
                 title: row.get(3)?,
                 video_path: row.get(4)?,
                 cover_path: row.get(5)?,
+                release_date: None,
             })
         })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
+
+    // Release dates belong to individual entries in data/meta.json. The database
+    // intentionally keeps only the first date for library ordering, so hydrate
+    // the detail view from the canonical metadata file.
+    let meta_path = std::path::Path::new(&work.folder_path).join("data").join("meta.json");
+    if let Ok(content) = std::fs::read_to_string(meta_path) {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+            let release_dates: std::collections::HashMap<i32, String> = json
+                .get("episode_list")
+                .and_then(|list| list.as_array())
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|item| {
+                            let id = item.get("id")?.as_i64()? as i32;
+                            let date = item.get("release_date")?.as_str()?.trim();
+                            (!date.is_empty()).then(|| (id, date.to_string()))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            for episode in &mut episodes {
+                episode.release_date = release_dates.get(&episode.number).cloned();
+            }
+        }
+    }
 
     // Get tags
     let mut tag_stmt = conn

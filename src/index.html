@@ -987,7 +987,16 @@ async function showDetail(id) {
     var attrTags = tags.filter(function(t){ return t.category === '属性'; });
     var sceneTags = tags.filter(function(t){ return t.category === '场景'; });
 
-    var tagHtml = '<div class="detail-tag-row"><span class="detail-section-title">年份</span><span class="detail-tag">' + w.year + '-' + String(w.month).padStart(2,'0') + '</span></div>';
+    var releaseDates = episodes.map(function(e, index){
+      var episodeNumber = Number(e.number) || (index + 1);
+      var date = e.release_date || (w.year + '-' + String(w.month).padStart(2,'0'));
+      return { number: episodeNumber, date: date };
+    });
+    var tagHtml = '<div class="detail-tag-row"><span class="detail-section-title">年份</span>';
+    releaseDates.forEach(function(item){
+      tagHtml += '<span class="detail-tag">第 ' + String(item.number).padStart(2, '0') + ' 集 ' + escHtml(item.date) + '</span>';
+    });
+    tagHtml += '</div>';
     if (chars.length > 0) tagHtml += renderDetailTagRow('角色', chars, null, false);
     if (w.studio) tagHtml += renderDetailTagRow('制作商', [{ name: w.studio }], 'studio', true);
     if (storyTags.length > 0) tagHtml += renderDetailTagRow('剧情', storyTags, 'story', true);
