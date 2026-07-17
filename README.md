@@ -24,7 +24,17 @@ D:\Ark\hanime-manager-app
 .
 ├─ README.md
 ├─ src
-│  └─ index.html              # 前端，单文件 HTML/CSS/JS
+│  ├─ index.html              # 页面骨架和脚本引用
+│  ├─ styles.css              # 全局样式
+│  └─ js
+│     ├─ state.js             # Tauri invoke、全局状态、布局测量
+│     ├─ navigation.js        # 页面切换、封面缓存、初始化
+│     ├─ filters.js           # 筛选、排序、分页状态
+│     ├─ detail.js            # 主库卡片、详情页渲染
+│     ├─ player.js            # libmpv 播放器、进度、音量、取帧
+│     ├─ archive.js           # 未建档和建档助手
+│     ├─ settings.js          # 设置、扫描、同步、备份
+│     └─ events.js            # DOM 事件绑定和启动入口
 └─ src-tauri
    ├─ Cargo.toml              # Rust/Tauri 依赖
    ├─ tauri.conf.json         # Tauri 配置
@@ -122,8 +132,11 @@ mp4, mkv, avi, wmv, flv, mov, webm
 
 ## 前端主要流程
 
-前端都在 `src/index.html`：
+前端是原生 HTML/CSS/JS，没有引入 Vue/React：
 
+- `src/index.html` 只保留页面结构，不放大段 CSS/JS。
+- `src/styles.css` 放全部样式。
+- `src/js/*.js` 按功能拆分，但不是 ES module，仍按普通 `<script>` 顺序加载，所以函数会挂在全局，HTML 里的 `onclick` 能直接访问。
 - 主库：加载 `get_all_works_with_tags`，前端本地搜索、排序、分页、筛选。
 - 年份筛选：年份表示整年，月份表示精确月份。年份按钮的“当前展开”和“已筛选”是两个不同状态。
 - 详情页：调用 `get_work_detail`，展示封面、简介、角色、制作商、tag、集数列表。
