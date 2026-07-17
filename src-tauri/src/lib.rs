@@ -1578,13 +1578,36 @@ pub struct Database {
     pub conn: Mutex<Connection>,
 }
 
-fn get_db_path() -> String {
+fn portable_app_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.to_path_buf()))
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
+fn legacy_app_data_dir() -> std::path::PathBuf {
     let app_data = std::env::var("APPDATA")
         .or_else(|_| std::env::var("LOCALAPPDATA"))
         .unwrap_or_else(|_| ".".to_string());
-    let dir = std::path::Path::new(&app_data).join("HAnimeManager");
+    std::path::Path::new(&app_data).join("HAnimeManager")
+}
+
+fn portable_cache_dir(kind: &str) -> std::path::PathBuf {
+    portable_app_dir().join("cache").join(kind)
+}
+
+fn get_db_path() -> String {
+    let dir = portable_app_dir();
     std::fs::create_dir_all(&dir).ok();
-    dir.join("database.db").to_string_lossy().to_string()
+    let portable_db = dir.join("database.db");
+    if !portable_db.exists() {
+        let legacy_db = legacy_app_data_dir().join("database.db");
+        if legacy_db.exists() {
+            let _ = std::fs::copy(&legacy_db, &portable_db);
+        }
+    }
+    portable_db.to_string_lossy().to_string()
 }
 
 fn parse_year_month(value: &str) -> Option<(i32, i32)> {
@@ -2255,13 +2278,7 @@ fn update_work_cover(
     db: State<Database>,
 ) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let app_data = std::env::var("APPDATA")
-        .or_else(|_| std::env::var("LOCALAPPDATA"))
-        .unwrap_or_default();
-    let cover_dir = std::path::Path::new(&app_data)
-        .join("HAnimeManager")
-        .join("cache")
-        .join("covers");
+    let cover_dir = portable_cache_dir("covers");
     std::fs::create_dir_all(&cover_dir).map_err(|e| e.to_string())?;
 
     // Decode base64 (remove data:image/...;base64, prefix if present)
@@ -2311,13 +2328,7 @@ fn update_episode_cover(
     db: State<Database>,
 ) -> Result<String, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let app_data = std::env::var("APPDATA")
-        .or_else(|_| std::env::var("LOCALAPPDATA"))
-        .unwrap_or_default();
-    let cover_dir = std::path::Path::new(&app_data)
-        .join("HAnimeManager")
-        .join("cache")
-        .join("episodes");
+    let cover_dir = portable_cache_dir("episodes");
     std::fs::create_dir_all(&cover_dir).map_err(|e| e.to_string())?;
 
     let data = if cover_data.contains(";base64,") {
@@ -2349,6 +2360,10 @@ fn update_episode_cover(
 
 fn ffmpeg_path() -> String {
     std::env::var("FFMPEG_PATH").unwrap_or_else(|_| {
+        let portable = portable_app_dir().join("bin").join("ffmpeg.exe");
+        if portable.exists() {
+            return portable.to_string_lossy().to_string();
+        }
         let bundled = r"D:\Envirnment\ffmpeg\bin\ffmpeg.exe";
         if std::path::Path::new(bundled).exists() {
             bundled.to_string()
@@ -2691,12 +2706,7 @@ fn backup_database(backup_path: String, db: State<Database>) -> Result<(), Strin
 
 #[tauri::command]
 fn restore_database(restore_path: String) -> Result<(), String> {
-    let db_path = std::env::var("APPDATA")
-        .or_else(|_| std::env::var("LOCALAPPDATA"))
-        .unwrap_or_default();
-    let db_file = std::path::Path::new(&db_path)
-        .join("HAnimeManager")
-        .join("database.db");
+    let db_file = portable_app_dir().join("database.db");
     std::fs::copy(&restore_path, &db_file).map_err(|e| format!("恢复失败: {}", e))?;
     Ok(())
 }
