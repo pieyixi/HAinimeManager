@@ -102,6 +102,7 @@
   .episode-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:7px;cursor:pointer;border:1px solid transparent}
   .episode-item:hover{background:#f8fafc;border-color:var(--line)}
   .episode-cover{width:112px;height:63px;border-radius:6px;background:#e9edf2;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px;color:#aab3bf;overflow:hidden;position:relative}
+  .episode-badge{position:absolute;left:6px;bottom:6px;z-index:1;min-width:39px;padding:3px 5px;border-radius:4px;background:rgba(17,24,39,0.76);color:#fff;font-size:10px;font-weight:700;line-height:1;text-align:center;letter-spacing:.04em}
   .episode-info{flex:1;min-width:0}
   .episode-num{font-size:13px;font-weight:650;color:#111827}
   .episode-sub{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -276,10 +277,6 @@
         <div class="detail-right">
           <div class="detail-main">
             <div class="detail-title" id="detailTitle"></div>
-            <div class="detail-meta-row">
-              <div class="detail-date" id="detailDate"></div>
-              <div class="detail-studio" id="detailStudio"></div>
-            </div>
             <div class="detail-tags" id="detailTags"></div>
             <div class="detail-desc" id="detailDesc"></div>
           </div>
@@ -679,6 +676,9 @@ function openDropdown(key, btn) {
   dd.id = 'filterDropdown';
   dd.className = 'filter-dd';
   dd.setAttribute('data-key', key);
+  // Re-rendering a month button detaches the click target before it reaches document.
+  // Keep every click in the menu from being mistaken for an outside click.
+  dd.addEventListener('click', function(e){ e.stopPropagation(); });
 
   var isVertical = key === 'studio';
   dd.style.width = isVertical ? '180px' : 'min(480px, calc(100vw - 20px))';
@@ -758,9 +758,18 @@ function toggleYearMonth(value) {
 }
 
 function selectWholeYear(year) {
-  state.activeFilters.year = {};
+  if (!state.activeFilters.year) state.activeFilters.year = {};
+  var allSelected = true;
+  for (var checkMonth = 1; checkMonth <= 12; checkMonth++) {
+    if (!state.activeFilters.year[year + '-' + String(checkMonth).padStart(2, '0')]) {
+      allSelected = false;
+      break;
+    }
+  }
   for (var m = 1; m <= 12; m++) {
-    state.activeFilters.year[year + '-' + String(m).padStart(2, '0')] = true;
+    var value = year + '-' + String(m).padStart(2, '0');
+    if (allSelected) delete state.activeFilters.year[value];
+    else state.activeFilters.year[value] = true;
   }
   state.currentPage = 1;
   var dd = document.getElementById('filterDropdown');
@@ -958,8 +967,6 @@ async function showDetail(id) {
     var tags = detail.tags || [];
 
     document.getElementById('detailTitle').textContent = w.title;
-    document.getElementById('detailDate').textContent = w.year + '-' + String(w.month).padStart(2,'0');
-    document.getElementById('detailStudio').textContent = w.studio || '';
     document.getElementById('detailDesc').textContent = w.description || '（暂无简介）';
 
     var coverPaths = [];
@@ -988,12 +995,14 @@ async function showDetail(id) {
     if (sceneTags.length > 0) tagHtml += renderDetailTagRow('场景', sceneTags, 'scene', true);
     document.getElementById('detailTags').innerHTML = tagHtml;
 
-    document.getElementById('episodeList').innerHTML = episodes.map(function(e){
+    document.getElementById('episodeList').innerHTML = episodes.map(function(e, index){
       var eCover = coverUrl(e.cover_path);
       var eImgHtml = eCover ? '<img src="' + eCover + '" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0" onerror="this.style.display=\'none\'">' : '';
+      var episodeNumber = Number(e.number) || (index + 1);
+      var episodeLabel = String(episodeNumber).padStart(2, '0');
       return '<div class="episode-item" onclick="openPlayer(' + e.id + ')"><div class="episode-cover">' +
-        eImgHtml + '&#127916;</div>' +
-        '<div class="episode-info"><div class="episode-num">第' + e.number + '集</div><div class="episode-sub">' + escHtml(e.title) + '</div></div>' +
+        eImgHtml + '&#127916;<span class="episode-badge">EP ' + episodeLabel + '</span></div>' +
+        '<div class="episode-info"><div class="episode-num">第 ' + episodeLabel + ' 集</div><div class="episode-sub">' + escHtml(e.title) + '</div></div>' +
         '<div class="episode-play">&#9654; 播放</div></div>';
     }).join('');
 
