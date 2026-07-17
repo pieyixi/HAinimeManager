@@ -16,9 +16,9 @@
   .player-mask{display:none;position:fixed;background:var(--bg);z-index:1;pointer-events:none}
   body.player-mode .player-mask{display:block}
   .home{height:100%;min-height:0;width:100%;display:flex;flex-direction:column}
-  .search-row{position:sticky;top:0;z-index:20;display:grid;grid-template-columns:minmax(120px,1fr) minmax(420px,720px) minmax(120px,1fr);align-items:center;gap:18px;padding:18px 32px 10px;background:rgba(246,247,249,0.96);backdrop-filter:blur(12px)}
-  .toolbar-spacer{min-width:0}
-  .search-box{position:relative;width:100%}
+  .search-row{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:center;gap:18px;padding:18px 32px 10px;background:rgba(246,247,249,0.96);backdrop-filter:blur(12px)}
+  .toolbar-spacer{display:none}
+  .search-box{position:relative;width:min(720px,calc(100% - 260px));min-width:360px}
   .search-box input{width:100%;height:42px;border:1px solid #d9dee7;border-radius:999px;padding:0 96px 0 42px;font-size:14px;background:var(--panel);outline:none;font-family:inherit;color:var(--text);box-shadow:0 1px 2px rgba(15,23,42,0.04)}
   .search-box input:focus{border-color:#9db7f5;box-shadow:0 0 0 4px rgba(37,99,235,0.10),0 8px 24px rgba(15,23,42,0.08)}
   .search-box input::placeholder{color:#a0a7b1}
@@ -27,8 +27,8 @@
   .search-clear{position:absolute;right:10px;top:50%;transform:translateY(-50%);border:none;background:transparent;color:#a0a7b1;font-size:12px;cursor:pointer;font-family:inherit;display:none}
   .search-clear.visible{display:block}
   .search-clear:hover{color:#4b5563}
-  .header-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px}
-  .btn-icon{height:34px;padding:0 12px;border:1px solid var(--line);background:rgba(255,255,255,0.72);border-radius:999px;cursor:pointer;font-size:12px;color:#4b5563;display:flex;align-items:center;justify-content:center;gap:6px;font-family:inherit}
+  .header-actions{position:absolute;right:32px;top:18px;display:flex;align-items:center;justify-content:flex-end;gap:6px}
+  .btn-icon{height:34px;padding:0 13px;border:1px solid var(--line);background:rgba(255,255,255,0.72);border-radius:999px;cursor:pointer;font-size:12px;color:#4b5563;display:flex;align-items:center;justify-content:center;gap:6px;font-family:inherit;white-space:nowrap}
   .btn-icon:hover{background:#fff;border-color:#cfd5dd;box-shadow:0 2px 8px rgba(15,23,42,0.05)}
 
   .filter-row{display:flex;gap:4px;padding:6px 32px 22px;flex-wrap:wrap;position:relative;background:var(--bg);justify-content:center}
@@ -102,7 +102,6 @@
   .episode-item{display:flex;align-items:center;gap:12px;padding:8px;border-radius:7px;cursor:pointer;border:1px solid transparent}
   .episode-item:hover{background:#f8fafc;border-color:var(--line)}
   .episode-cover{width:112px;height:63px;border-radius:6px;background:#e9edf2;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:18px;color:#aab3bf;overflow:hidden;position:relative}
-  .episode-badge{position:absolute;left:6px;bottom:6px;z-index:1;min-width:39px;padding:3px 5px;border-radius:4px;background:rgba(17,24,39,0.76);color:#fff;font-size:10px;font-weight:700;line-height:1;text-align:center;letter-spacing:.04em}
   .episode-info{flex:1;min-width:0}
   .episode-num{font-size:13px;font-weight:650;color:#111827}
   .episode-sub{font-size:12px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -133,9 +132,9 @@
   .player-msg.err{color:var(--danger)}
   .player-msg.info{color:var(--primary)}
 
-  .settings{width:min(980px,calc(100% - 64px));padding:24px 0 36px;margin:0 auto}
-  .settings-title{font-size:28px;font-weight:750;color:#111827;margin-bottom:20px;text-align:left;letter-spacing:0}
-  .settings-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:16px;align-items:start}
+  .settings{width:100%;padding:20px 32px 36px;margin:0}
+  .settings-title{width:min(980px,100%);font-size:28px;font-weight:750;color:#111827;margin:0 auto 20px;text-align:left;letter-spacing:0}
+  .settings-grid{width:min(980px,100%);margin:0 auto;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:16px;align-items:start}
   .settings-group{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:14px;box-shadow:0 10px 30px rgba(15,23,42,0.04)}
   .settings-label{font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px}
   .settings-field{display:flex;align-items:center;gap:8px}
@@ -145,11 +144,11 @@
   .settings-msg{padding:9px 12px;border-radius:7px;font-size:13px;margin-top:10px;border:1px solid transparent}
   .settings-msg.info{background:var(--primary-soft);color:#1d4ed8;border-color:#d7e5ff}
   .settings-msg.err{background:var(--danger-soft);color:var(--danger);border-color:#ffd5d5}
-  .workspace{width:min(1160px,calc(100% - 64px));padding:24px 0 36px;margin:0 auto}
+  .workspace{width:100%;padding:20px 32px 36px;margin:0}
   .workspace-top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:18px}
   .workspace-title{font-size:28px;font-weight:750;color:#111827;line-height:1.2}
   .workspace-subtitle{font-size:13px;color:var(--muted);margin-top:6px}
-  .workspace-panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(15,23,42,0.04)}
+  .workspace-panel{max-width:1160px;margin:0 auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(15,23,42,0.04)}
   .unarchived-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}
   .unarchived-list{margin-top:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
   .unarchived-card{border:1px solid var(--line);border-radius:12px;background:#fff;padding:14px;display:flex;flex-direction:column;gap:12px;min-width:0;transition:border-color .12s,box-shadow .12s,transform .12s}
@@ -214,14 +213,14 @@
   .empty-state h2{font-size:18px;font-weight:650;color:#374151;margin-bottom:6px}
   .loading{text-align:center;padding:72px 20px;color:var(--muted);grid-column:1/-1;font-size:14px}
   @media (max-width:760px){
-    .search-row{grid-template-columns:1fr auto;gap:10px}
-    .toolbar-spacer{display:none}
-    .search-box{grid-column:1/2}
+    .search-row{justify-content:flex-start;gap:10px}
+    .search-box{width:calc(100% - 156px);min-width:0}
+    .header-actions{right:16px}
     .detail-layout{grid-template-columns:1fr}
     .detail-left,.detail-cover{width:100%;max-width:320px}
     .player-page{padding:16px}
     .player-head{align-items:flex-start;flex-direction:column}
-    .settings,.workspace{width:calc(100% - 32px)}
+    .settings,.workspace{width:100%;padding-left:16px;padding-right:16px}
     .settings-grid,.unarchived-toolbar{grid-template-columns:1fr}
     .archive-shell{grid-template-columns:1fr}
     .archive-panel.sticky{position:static}
@@ -242,8 +241,8 @@
           <button class="search-clear" id="searchClear" onclick="clearSearch()">清除</button>
         </div>
         <div class="header-actions">
-          <button class="btn-icon" onclick="openUnarchivedPage()" title="未建档"><span>&#9633;</span><span>未建档</span></button>
-          <button class="btn-icon" onclick="showPage('page-settings')" title="设置"><span>&#9881;</span><span>设置</span></button>
+          <button class="btn-icon" onclick="openUnarchivedPage()" title="未建档">未建档</button>
+          <button class="btn-icon" onclick="showPage('page-settings')" title="设置">设置</button>
         </div>
       </div>
       <div class="filter-row" id="filterRow">
@@ -727,7 +726,8 @@ function renderYearDropdown(dd) {
   dd.setAttribute('data-year', selectedYear);
   var html = '<div class="year-list">';
   years.forEach(function(y){
-    html += '<button class="year-option' + (String(y) === selectedYear ? ' active' : '') + '" onclick="selectYearInDropdown(' + y + ')">' + y + '年</button>';
+    var yearSelected = state.activeFilters.year && state.activeFilters.year[String(y)];
+    html += '<button class="year-option' + (String(y) === selectedYear || yearSelected ? ' active' : '') + '" onclick="toggleWholeYear(' + y + ')">' + y + '年</button>';
   });
   html += '</div><div class="month-panel"><div class="dd-header">' + selectedYear + '年</div>';
   html += '<div class="month-grid">';
@@ -736,7 +736,7 @@ function renderYearDropdown(dd) {
     var sel = state.activeFilters.year && state.activeFilters.year[val];
     html += '<button class="month-cell' + (sel ? ' selected' : '') + '" onclick="toggleYearMonth(\'' + val + '\')">' + m + '月</button>';
   }
-  html += '</div><div class="dd-actions"><span onclick="clearFilter(\'year\')">清除</span><span onclick="selectWholeYear(' + selectedYear + ')">全选全年</span><span class="primary" onclick="closeDropdown()">确定</span></div></div>';
+  html += '</div><div class="dd-actions"><span onclick="clearFilter(\'year\')">清除</span><span onclick="selectYearInDropdown(' + selectedYear + ')">只看月份</span><span class="primary" onclick="closeDropdown()">确定</span></div></div>';
   dd.innerHTML = html;
 }
 
@@ -749,6 +749,8 @@ function selectYearInDropdown(year) {
 
 function toggleYearMonth(value) {
   if (!state.activeFilters.year) state.activeFilters.year = {};
+  var yearKey = String(value).slice(0, 4);
+  delete state.activeFilters.year[yearKey];
   if (state.activeFilters.year[value]) delete state.activeFilters.year[value];
   else state.activeFilters.year[value] = true;
   state.currentPage = 1;
@@ -757,22 +759,17 @@ function toggleYearMonth(value) {
   applyFilter();
 }
 
-function selectWholeYear(year) {
+function toggleWholeYear(year) {
   if (!state.activeFilters.year) state.activeFilters.year = {};
-  var allSelected = true;
-  for (var checkMonth = 1; checkMonth <= 12; checkMonth++) {
-    if (!state.activeFilters.year[year + '-' + String(checkMonth).padStart(2, '0')]) {
-      allSelected = false;
-      break;
-    }
-  }
-  for (var m = 1; m <= 12; m++) {
-    var value = year + '-' + String(m).padStart(2, '0');
-    if (allSelected) delete state.activeFilters.year[value];
-    else state.activeFilters.year[value] = true;
+  var key = String(year);
+  if (state.activeFilters.year[key]) {
+    delete state.activeFilters.year[key];
+  } else {
+    state.activeFilters.year[key] = true;
   }
   state.currentPage = 1;
   var dd = document.getElementById('filterDropdown');
+  if (dd) dd.setAttribute('data-year', key);
   if (dd) renderYearDropdown(dd);
   applyFilter();
 }
@@ -829,7 +826,10 @@ function applyFilter() {
     var vals = Object.keys(state.activeFilters[key]);
     if (!vals.length) continue;
     results = results.filter(function(w){
-      if (key === 'year') return vals.some(function(v){ return (w.year + '-' + String(w.month).padStart(2, '0')) === v; });
+      if (key === 'year') {
+        var monthValue = w.year + '-' + String(w.month).padStart(2, '0');
+        return vals.some(function(v){ return String(w.year) === v || monthValue === v; });
+      }
       if (key === 'studio') return vals.indexOf(w.studio) >= 0;
       var cat = CAT_MAP[key];
       if (!cat) return true;
@@ -982,7 +982,8 @@ async function showDetail(id) {
       dc.innerHTML = '&#127916;';
     }
 
-    var chars = tags.filter(function(t){ return t.category === '人物'; });
+    var chars = (detail.characters || []).map(function(name){ return { name: name }; });
+    if (!chars.length) chars = tags.filter(function(t){ return t.category === '人物'; });
     var storyTags = tags.filter(function(t){ return t.category === '剧情'; });
     var attrTags = tags.filter(function(t){ return t.category === '属性'; });
     var sceneTags = tags.filter(function(t){ return t.category === '场景'; });
@@ -1010,7 +1011,7 @@ async function showDetail(id) {
       var episodeNumber = Number(e.number) || (index + 1);
       var episodeLabel = String(episodeNumber).padStart(2, '0');
       return '<div class="episode-item" onclick="openPlayer(' + e.id + ')"><div class="episode-cover">' +
-        eImgHtml + '&#127916;<span class="episode-badge">EP ' + episodeLabel + '</span></div>' +
+        eImgHtml + '&#127916;</div>' +
         '<div class="episode-info"><div class="episode-num">第 ' + episodeLabel + ' 集</div><div class="episode-sub">' + escHtml(e.title) + '</div></div>' +
         '<div class="episode-play">&#9654; 播放</div></div>';
     }).join('');

@@ -55,6 +55,7 @@ pub struct WorkDetail {
     pub work: Work,
     pub episodes: Vec<Episode>,
     pub tags: Vec<Tag>,
+    pub characters: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
@@ -1889,6 +1890,7 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
     // intentionally keeps only the first date for library ordering, so hydrate
     // the detail view from the canonical metadata file.
     let meta_path = std::path::Path::new(&work.folder_path).join("data").join("meta.json");
+    let mut characters: Vec<String> = Vec::new();
     if let Ok(content) = std::fs::read_to_string(meta_path) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
             let release_dates: std::collections::HashMap<i32, String> = json
@@ -1907,6 +1909,23 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
             for episode in &mut episodes {
                 episode.release_date = release_dates.get(&episode.number).cloned();
             }
+
+            characters = json
+                .get("characters")
+                .and_then(|chars| chars.as_object())
+                .map(|chars| {
+                    let mut ordered: Vec<(i32, String)> = chars
+                        .iter()
+                        .filter_map(|(key, value)| {
+                            let index = key.parse::<i32>().ok()?;
+                            let name = value.as_str()?.trim();
+                            (!name.is_empty()).then(|| (index, name.to_string()))
+                        })
+                        .collect();
+                    ordered.sort_by_key(|(index, _)| *index);
+                    ordered.into_iter().map(|(_, name)| name).collect()
+                })
+                .unwrap_or_default();
         }
     }
 
@@ -1935,6 +1954,7 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
         work,
         episodes,
         tags,
+        characters,
     })
 }
 
