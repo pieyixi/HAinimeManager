@@ -919,7 +919,7 @@ async function showDetail(id) {
       return '<div class="episode-item" onclick="openPlayer(' + e.id + ')"><div class="episode-cover">' +
         eImgHtml + '&#127916;</div>' +
         '<div class="episode-info"><div class="episode-num">第' + e.number + '集</div><div class="episode-sub">' + escHtml(e.title) + '</div></div>' +
-        '<div class="episode-play">&#9654; 播放 / 截封面</div></div>';
+        '<div class="episode-play">&#9654; 播放</div></div>';
     }).join('');
 
     document.getElementById('btnOpenFolder').onclick = function(){ openWorkFolder(w.folder_path); };
@@ -1220,7 +1220,7 @@ async function captureCurrentFrame() {
     await reloadCoverCache(savedPath);
     playerMessage('info', '已截为本集封面');
   } catch(e) {
-    playerMessage('err', '截封面失败: ' + (e.message || e));
+    playerMessage('err', '取帧失败: ' + (e.message || e));
   }
 }
 
