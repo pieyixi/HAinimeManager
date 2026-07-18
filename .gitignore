@@ -1,5 +1,4 @@
 src-tauri/target/
 backups/
-tmp/
 *.log
 *.tmp

@@ -46,11 +46,6 @@ document.addEventListener('keyup', function(e){
 function handlePlayerKeydown(e) {
   if (!document.getElementById('page-player').classList.contains('active')) return false;
   if (isTypingTarget(e.target)) return false;
-  if (e.ctrlKey && e.shiftKey && String(e.key).toLowerCase() === 'd') {
-    if (!e.repeat) togglePlayerDebug();
-    e.preventDefault();
-    return true;
-  }
   if (e.key === ' ') {
     if (!e.repeat) togglePlayerPlay();
     e.preventDefault();
