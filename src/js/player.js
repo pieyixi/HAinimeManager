@@ -71,6 +71,7 @@ async function syncMpvBounds() {
   var viewport = getPlayerViewportSize();
   var box = clampMpvRect(rect, viewport.width, viewport.height);
   box = applyMpvHitTestGuard(box, viewport.width, viewport.height);
+  updatePlayerDebugSnapshot(rect, box, viewport);
   updatePlayerMasks(box, viewport.width, viewport.height);
   if (!state.player.libmpvReady) return;
   await mpvPlugin('set_video_margin_ratio', {
@@ -82,6 +83,53 @@ async function syncMpvBounds() {
       bottom: (viewport.height - box.bottom) / viewport.height,
     },
   }).catch(function(){});
+}
+
+function roundRectForDebug(rect) {
+  return {
+    left: Math.round(rect.left),
+    top: Math.round(rect.top),
+    right: Math.round(rect.right),
+    bottom: Math.round(rect.bottom),
+    width: Math.round(rect.width || (rect.right - rect.left)),
+    height: Math.round(rect.height || (rect.bottom - rect.top)),
+  };
+}
+
+function updatePlayerDebugSnapshot(stageRect, mpvBox, viewport) {
+  var controls = document.querySelector('.player-controls');
+  var shell = document.querySelector('.player-shell');
+  var controlsRect = controls ? controls.getBoundingClientRect() : null;
+  var shellRect = shell ? shell.getBoundingClientRect() : null;
+  state.player.debugSnapshot = {
+    dpr: window.devicePixelRatio || 1,
+    viewport: viewport,
+    shell: shellRect ? roundRectForDebug(shellRect) : null,
+    stage: roundRectForDebug(stageRect),
+    controls: controlsRect ? roundRectForDebug(controlsRect) : null,
+    mpvBox: mpvBox,
+    marginRatio: {
+      left: Number((mpvBox.left / viewport.width).toFixed(5)),
+      right: Number(((viewport.width - mpvBox.right) / viewport.width).toFixed(5)),
+      top: Number((mpvBox.top / viewport.height).toFixed(5)),
+      bottom: Number(((viewport.height - mpvBox.bottom) / viewport.height).toFixed(5)),
+    },
+  };
+  renderPlayerDebug();
+}
+
+function renderPlayerDebug() {
+  var box = document.getElementById('playerDebug');
+  if (!box) return;
+  box.classList.toggle('active', !!state.player.debug);
+  if (!state.player.debug) return;
+  box.textContent = JSON.stringify(state.player.debugSnapshot || {}, null, 2);
+}
+
+function togglePlayerDebug() {
+  state.player.debug = !state.player.debug;
+  renderPlayerDebug();
+  if (state.player.debug) scheduleMpvBoundsSync();
 }
 
 function applyMpvHitTestGuard(box, width, height) {

@@ -31,6 +31,8 @@ var state = {
     keySeekTimer: null,
     keySeekInterval: null,
     keySeekDirection: 0,
+    debug: false,
+    debugSnapshot: null,
   },
   archive: {
     draft: null,

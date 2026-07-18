@@ -114,6 +114,8 @@
   .player-stage{background:#05070b;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;width:100%;aspect-ratio:16/9;min-height:0;border:1px solid #0b1220;position:relative}
   body.player-mode .player-stage{background:transparent;border-color:transparent;border-radius:0}
   .mpv-host-hint{color:#7b8494;font-size:13px;pointer-events:none}
+  .player-debug{display:none;position:fixed;left:32px;bottom:96px;z-index:30;max-width:560px;max-height:260px;overflow:auto;margin:0;padding:10px 12px;border:1px solid #c8d3e4;border-radius:8px;background:rgba(255,255,255,0.94);box-shadow:0 12px 30px rgba(15,23,42,0.16);font:12px/1.5 Consolas,"Cascadia Mono",monospace;color:#111827;white-space:pre-wrap;pointer-events:none}
+  .player-debug.active{display:block}
   .player-controls{position:relative;z-index:5;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:0 10px 30px rgba(15,23,42,0.05)}
   .player-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .player-row + .player-row{margin-top:12px}

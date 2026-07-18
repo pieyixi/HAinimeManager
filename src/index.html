@@ -78,10 +78,11 @@
           <div class="player-title" id="playerTitle">播放器</div>
           <button class="btn-secondary" onclick="openPlayerExternal()">外部播放器</button>
         </div>
-        <div class="player-stage" id="mpvStage">
-          <div class="mpv-host-hint" id="mpvHint">mpv 播放区域</div>
-        </div>
-        <div class="player-controls">
+          <div class="player-stage" id="mpvStage">
+            <div class="mpv-host-hint" id="mpvHint">mpv 播放区域</div>
+          </div>
+          <pre class="player-debug" id="playerDebug"></pre>
+          <div class="player-controls">
           <div class="player-row">
             <button class="btn-secondary" onclick="togglePlayerPlay()">播放/暂停</button>
             <button class="btn-secondary" onclick="seekPlayer(-5)">-5s</button>
