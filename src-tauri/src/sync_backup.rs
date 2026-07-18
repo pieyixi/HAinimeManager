@@ -73,6 +73,10 @@ fn batch_import_folders(folders: Vec<String>, db: State<Database>) -> Result<i32
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut count = 0;
     for fp in folders {
+        let missing = archive_missing_reasons(&fp);
+        if !missing.is_empty() {
+            return Err(format!("{} 建档未完整: {}", fp, missing.join("、")));
+        }
         let before: i64 = conn
             .query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0))
             .unwrap_or(0);

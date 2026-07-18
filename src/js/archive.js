@@ -264,8 +264,14 @@ async function savePastedArchiveJson() {
   }
   try {
     var outPath = await invoke('save_archive_json', { dirPath: dirPath, jsonText: jsonText });
-    showJsonPasteMsg('info', '已保存: ' + outPath);
     await loadArchiveDraft();
+    try {
+      await invoke('import_work_via_json', { dirPath: dirPath });
+      await refreshHomeLibrary({ resetFilters: true, clearCoverCache: true });
+      showJsonPasteMsg('info', '已保存并导入主库: ' + outPath);
+    } catch(importError) {
+      showJsonPasteMsg('info', '已保存: ' + outPath + '；暂未导入主库: ' + (importError.message || importError));
+    }
   } catch(e) {
     showJsonPasteMsg('err', '保存失败: ' + (e.message || e));
   }

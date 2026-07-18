@@ -1,5 +1,24 @@
 // ─── Settings ───────────────────────────
 
+function renderImportFolders(msg, folders, title) {
+  state.scanFolders = folders || [];
+  if (!state.scanFolders.length) {
+    msg.innerHTML = '<div class="settings-msg info">未发现新作品</div>';
+    return;
+  }
+  var html = '<div class="settings-msg info">' + escHtml(title) + state.scanFolders.length + ' 个新作品</div>';
+  html += '<div style="margin-top:8px;max-height:200px;overflow-y:auto;font-size:12px;color:#555">';
+  state.scanFolders.forEach(function(f){
+    var name = f.split(/[\\/]/).pop();
+    html += '<div style="padding:4px 0;display:flex;align-items:center;gap:8px">' +
+      '<span style="flex:1">' + escHtml(name) + '</span>' +
+      '<button class="btn-secondary" onclick="doImportOne(\'' + escAttr(f) + '\')" style="font-size:11px;padding:2px 8px">导入</button></div>';
+  });
+  html += '</div>';
+  html += '<button class="btn-secondary" style="margin-top:6px" onclick="doBatchImport()">全部导入</button>';
+  msg.innerHTML = html;
+}
+
 async function doScan() {
   var path = document.getElementById('mediaPath').value.trim();
   if (!path) return;
@@ -7,45 +26,35 @@ async function doScan() {
   msg.innerHTML = '<div class="settings-msg info">扫描中...</div>';
   try {
     var folders = await invoke('scan_folder', { rootPath: path });
-    state.scanFolders = folders || [];
-    if (!folders.length) {
-      msg.innerHTML = '<div class="settings-msg info">未发现新作品</div>';
-      return;
-    }
-    var html = '<div class="settings-msg info">发现 ' + folders.length + ' 个新作品</div>';
-    html += '<div style="margin-top:8px;max-height:200px;overflow-y:auto;font-size:12px;color:#555">';
-    folders.forEach(function(f, i){
-      var name = f.split(/[\\/]/).pop();
-      html += '<div style="padding:4px 0;display:flex;align-items:center;gap:8px">' +
-        '<span style="flex:1">' + escHtml(name) + '</span>' +
-        '<button class="btn-secondary" onclick="doImportOne(\'' + escAttr(f) + '\')" style="font-size:11px;padding:2px 8px">导入</button></div>';
-    });
-    html += '</div>';
-    html += '<button class="btn-secondary" style="margin-top:6px" onclick="doBatchImport()">全部导入</button>';
-    msg.innerHTML = html;
+    renderImportFolders(msg, folders, '发现 ');
   } catch(e) {
     msg.innerHTML = '<div class="settings-msg err">扫描失败: ' + e + '</div>';
   }
 }
 
 async function doImportOne(dirPath) {
+  var msg = document.getElementById('scanMsg');
   try {
+    msg.innerHTML = '<div class="settings-msg info">导入中: ' + escHtml(dirPath.split(/[\\/]/).pop()) + '</div>';
+    await delay(30);
     var id = await invoke('import_work_via_json', { dirPath: dirPath });
-    var msg = document.getElementById('scanMsg');
     msg.innerHTML = '<div class="settings-msg info">导入成功 ID=' + id + '</div>';
-    init();
+    await refreshHomeLibrary({ resetFilters: true, clearCoverCache: true });
   } catch(e) {
-    document.getElementById('scanMsg').innerHTML = '<div class="settings-msg err">导入失败: ' + e + '</div>';
+    msg.innerHTML = '<div class="settings-msg err">导入失败: ' + e + '</div>';
   }
 }
 
 async function doBatchImport() {
+  var msg = document.getElementById('scanMsg');
   try {
+    msg.innerHTML = '<div class="settings-msg info">批量导入中...</div>';
+    await delay(30);
     var count = await invoke('batch_import_folders', { folders: state.scanFolders });
-    document.getElementById('scanMsg').innerHTML = '<div class="settings-msg info">成功导入 ' + count + ' 个作品</div>';
-    init();
+    msg.innerHTML = '<div class="settings-msg info">成功导入 ' + count + ' 个作品</div>';
+    await refreshHomeLibrary({ resetFilters: true, clearCoverCache: true });
   } catch(e) {
-    document.getElementById('scanMsg').innerHTML = '<div class="settings-msg err">批量导入失败: ' + e + '</div>';
+    msg.innerHTML = '<div class="settings-msg err">批量导入失败: ' + e + '</div>';
   }
 }
 
@@ -58,14 +67,15 @@ async function doSync() {
     var result = await invoke('sync_database', { rootPath: path });
     var html = '';
     if (result.new_folders && result.new_folders.length > 0) {
-      html += '<div class="settings-msg info">发现 ' + result.new_folders.length + ' 个新文件夹</div>';
+      renderImportFolders(msg, result.new_folders, '同步发现 ');
+      html = msg.innerHTML;
     }
     if (result.missing_works && result.missing_works.length > 0) {
       html += '<div class="settings-msg err">有 ' + result.missing_works.length + ' 个作品路径不存在</div>';
     }
     if (!html) html = '<div class="settings-msg info">数据库已是最新</div>';
     msg.innerHTML = html;
-    init();
+    await reloadLibraryData({ resetFilters: false, clearCoverCache: false });
   } catch(e) {
     msg.innerHTML = '<div class="settings-msg err">同步失败: ' + e + '</div>';
   }

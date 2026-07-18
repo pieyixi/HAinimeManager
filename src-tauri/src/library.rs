@@ -293,6 +293,10 @@ fn scan_folder(root_path: String, db: State<Database>) -> Result<Vec<String>, St
 
 #[tauri::command]
 fn import_work_via_json(dir_path: String, db: State<Database>) -> Result<i64, String> {
+    let missing = archive_missing_reasons(&dir_path);
+    if !missing.is_empty() {
+        return Err(format!("建档未完整: {}", missing.join("、")));
+    }
     let d = db.conn.lock().map_err(|e| e.to_string())?;
     import_work_dir(&d, &dir_path)
 }

@@ -22,10 +22,15 @@ function resetHomeFilters() {
 async function refreshHomeLibrary(options) {
   options = options || {};
   closeWorkContextMenu();
-  if (options.resetFilters) resetHomeFilters();
-  if (options.clearCoverCache) state.coverCache = {};
   showPage('page-home');
   await delay(30);
+  await reloadLibraryData(options);
+}
+
+async function reloadLibraryData(options) {
+  options = options || {};
+  if (options.resetFilters) resetHomeFilters();
+  if (options.clearCoverCache) state.coverCache = {};
   await init();
 }
 
