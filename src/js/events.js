@@ -31,12 +31,52 @@ document.addEventListener('contextmenu', function(e){
 });
 
 document.addEventListener('keydown', function(e){
+  if (handlePlayerKeydown(e)) return;
   if (e.key === 'Escape') {
     closeDropdown();
     closeWorkContextMenu();
     resolveConfirm(false);
   }
 });
+
+document.addEventListener('keyup', function(e){
+  handlePlayerKeyup(e);
+});
+
+function handlePlayerKeydown(e) {
+  if (!document.getElementById('page-player').classList.contains('active')) return false;
+  if (isTypingTarget(e.target)) return false;
+  if (e.key === ' ') {
+    if (!e.repeat) togglePlayerPlay();
+    e.preventDefault();
+    return true;
+  }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    if (!e.repeat) beginPlayerKeySeek(e.key === 'ArrowRight' ? 1 : -1);
+    e.preventDefault();
+    return true;
+  }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (!e.repeat) adjustPlayerVolume(e.key === 'ArrowUp' ? 5 : -5);
+    e.preventDefault();
+    return true;
+  }
+  return false;
+}
+
+function handlePlayerKeyup(e) {
+  if (!document.getElementById('page-player').classList.contains('active')) return;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+    stopPlayerKeySeek();
+    e.preventDefault();
+  }
+}
+
+function isTypingTarget(target) {
+  if (!target) return false;
+  var tag = String(target.tagName || '').toLowerCase();
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
+}
 
 document.getElementById('confirmModal').addEventListener('click', function(e){
   if (e.target === this) resolveConfirm(false);
@@ -47,13 +87,16 @@ window.addEventListener('resize', function(){
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(function(){
     if (document.getElementById('page-player').classList.contains('active')) {
-      syncMpvBounds();
+      scheduleMpvBoundsSync();
       return;
     }
     if (!document.getElementById('page-home').classList.contains('active')) return;
     if (updatePageSize(true)) applyFilter();
   }, 80);
 });
+
+window.addEventListener('focus', scheduleMpvBoundsSync);
+window.addEventListener('mouseup', scheduleMpvBoundsSync);
 
 // ─── Start ──────────────────────────────
 

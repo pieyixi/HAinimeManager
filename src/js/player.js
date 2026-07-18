@@ -52,7 +52,10 @@ async function initLibMpv() {
         hwdec: 'auto-safe',
         'keep-open': 'yes',
         'force-window': 'yes',
-        panscan: 1,
+        panscan: 0,
+        keepaspect: 'yes',
+        'video-unscaled': 'no',
+        'video-aspect-override': '-1',
         osc: 'no',
       },
       observedProperties: {},
@@ -65,20 +68,34 @@ async function syncMpvBounds() {
   var stage = document.getElementById('mpvStage');
   if (!stage) return;
   var rect = stage.getBoundingClientRect();
-  var width = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
-  var height = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
-  updatePlayerMasks(rect, width, height);
+  var viewport = getPlayerViewportSize();
+  var box = clampMpvRect(rect, viewport.width, viewport.height);
+  updatePlayerMasks(box, viewport.width, viewport.height);
   if (!state.player.libmpvReady) return;
-  var bleed = 2;
   await mpvPlugin('set_video_margin_ratio', {
     windowLabel: 'main',
     ratio: {
-      left: Math.max(0, (rect.left - bleed) / width),
-      right: Math.max(0, (width - rect.right - bleed) / width),
-      top: Math.max(0, (rect.top - bleed) / height),
-      bottom: Math.max(0, (height - rect.bottom - bleed) / height),
+      left: box.left / viewport.width,
+      right: (viewport.width - box.right) / viewport.width,
+      top: box.top / viewport.height,
+      bottom: (viewport.height - box.bottom) / viewport.height,
     },
   }).catch(function(){});
+}
+
+function getPlayerViewportSize() {
+  return {
+    width: Math.max(1, document.documentElement.clientWidth || 0, window.innerWidth || 0),
+    height: Math.max(1, document.documentElement.clientHeight || 0, window.innerHeight || 0),
+  };
+}
+
+function clampMpvRect(rect, width, height) {
+  var left = Math.max(0, Math.min(width, Math.round(rect.left)));
+  var top = Math.max(0, Math.min(height, Math.round(rect.top)));
+  var right = Math.max(left + 1, Math.min(width, Math.round(rect.right)));
+  var bottom = Math.max(top + 1, Math.min(height, Math.round(rect.bottom)));
+  return { left: left, top: top, right: right, bottom: bottom };
 }
 
 function updatePlayerMasks(rect, width, height) {
@@ -87,10 +104,10 @@ function updatePlayerMasks(rect, width, height) {
   var bottom = document.getElementById('playerMaskBottom');
   var left = document.getElementById('playerMaskLeft');
   if (!top || !right || !bottom || !left) return;
-  var l = Math.max(0, Math.round(rect.left));
-  var t = Math.max(0, Math.round(rect.top));
-  var r = Math.min(width, Math.round(rect.right));
-  var b = Math.min(height, Math.round(rect.bottom));
+  var l = rect.left;
+  var t = rect.top;
+  var r = rect.right;
+  var b = rect.bottom;
   var overlap = 2;
   top.style.cssText = 'left:0;top:0;width:' + width + 'px;height:' + Math.max(0, t + overlap) + 'px';
   bottom.style.cssText = 'left:0;top:' + Math.max(0, b - overlap) + 'px;width:' + width + 'px;height:' + Math.max(0, height - b + overlap) + 'px';
@@ -130,6 +147,13 @@ function delay(ms) {
   return new Promise(function(resolve){ setTimeout(resolve, ms); });
 }
 
+function scheduleMpvBoundsSync() {
+  if (!document.getElementById('page-player').classList.contains('active')) return;
+  syncMpvBounds();
+  setTimeout(syncMpvBounds, 80);
+  setTimeout(syncMpvBounds, 240);
+}
+
 async function openPlayerWithEpisode(ep, title, mode) {
   if (!ep) return;
   state.player.episode = ep;
@@ -151,6 +175,8 @@ async function openPlayerWithEpisode(ep, title, mode) {
     await delay(140);
     document.body.classList.add('player-mode');
     await syncMpvBounds();
+    setTimeout(syncMpvBounds, 120);
+    setTimeout(syncMpvBounds, 360);
     document.getElementById('mpvHint').textContent = '';
     playerMessage('info', 'libmpv 已启动');
     await setPlayerVolume(document.getElementById('playerVolume').value);
@@ -175,6 +201,7 @@ async function openPlayer(episodeId) {
 
 async function returnFromPlayer() {
   stopPlayerTimer();
+  stopPlayerKeySeek();
   var mode = state.player.mode;
   try { await mpvPlugin('destroy', { windowLabel: 'main' }); } catch(e) {}
   state.player.libmpvReady = false;
@@ -195,6 +222,48 @@ async function seekPlayer(delta) {
   try { await mpvCommand('seek', [delta, 'relative']); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
 }
 
+async function setPlayerSpeed(value) {
+  try { await mpvSetProperty('speed', value); } catch(e) { playerMessage('err', String(e)); }
+}
+
+function isPlayerPageActive() {
+  var page = document.getElementById('page-player');
+  return !!(page && page.classList.contains('active'));
+}
+
+function beginPlayerKeySeek(direction) {
+  if (!isPlayerPageActive() || !state.player.libmpvReady) return;
+  if (state.player.keySeekDirection === direction) return;
+  stopPlayerKeySeek();
+  state.player.keySeekDirection = direction;
+  seekPlayer(direction * 3);
+  state.player.keySeekTimer = setTimeout(function(){
+    if (state.player.keySeekDirection !== direction) return;
+    if (direction > 0) {
+      setPlayerSpeed(3);
+    } else {
+      state.player.keySeekInterval = setInterval(function(){
+        seekPlayer(-3);
+      }, 180);
+    }
+  }, 260);
+}
+
+function stopPlayerKeySeek() {
+  if (state.player.keySeekTimer) {
+    clearTimeout(state.player.keySeekTimer);
+    state.player.keySeekTimer = null;
+  }
+  if (state.player.keySeekInterval) {
+    clearInterval(state.player.keySeekInterval);
+    state.player.keySeekInterval = null;
+  }
+  if (state.player.keySeekDirection > 0 && state.player.libmpvReady) {
+    setPlayerSpeed(1);
+  }
+  state.player.keySeekDirection = 0;
+}
+
 function previewPlayerSeek(value) {
   state.player.currentTime = Math.max(0, Number(value) || 0);
   updatePlayerControls();
@@ -208,7 +277,16 @@ async function seekPlayerTo(value) {
 
 async function setPlayerVolume(value) {
   if (state.player.muted) return;
-  try { await mpvSetProperty('volume', Math.max(0, Math.min(100, Number(value) || 0))); } catch(e) { playerMessage('err', String(e)); }
+  var volume = Math.max(0, Math.min(100, Number(value) || 0));
+  var slider = document.getElementById('playerVolume');
+  if (slider) slider.value = volume;
+  try { await mpvSetProperty('volume', volume); } catch(e) { playerMessage('err', String(e)); }
+}
+
+function adjustPlayerVolume(delta) {
+  var slider = document.getElementById('playerVolume');
+  var current = slider ? Number(slider.value) : 60;
+  setPlayerVolume(current + delta);
 }
 
 async function toggleMute() {

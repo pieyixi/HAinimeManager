@@ -28,6 +28,9 @@ var state = {
     libmpvReady: false,
     muted: false,
     mode: 'detail',
+    keySeekTimer: null,
+    keySeekInterval: null,
+    keySeekDirection: 0,
   },
   archive: {
     draft: null,
