@@ -70,6 +70,7 @@ async function syncMpvBounds() {
   var rect = stage.getBoundingClientRect();
   var viewport = getPlayerViewportSize();
   var box = clampMpvRect(rect, viewport.width, viewport.height);
+  box = applyMpvHitTestGuard(box, viewport.width, viewport.height);
   updatePlayerMasks(box, viewport.width, viewport.height);
   if (!state.player.libmpvReady) return;
   await mpvPlugin('set_video_margin_ratio', {
@@ -81,6 +82,23 @@ async function syncMpvBounds() {
       bottom: (viewport.height - box.bottom) / viewport.height,
     },
   }).catch(function(){});
+}
+
+function applyMpvHitTestGuard(box, width, height) {
+  var controls = document.querySelector('.player-controls');
+  var guarded = {
+    left: Math.min(width - 1, box.left + 2),
+    top: Math.min(height - 1, box.top + 2),
+    right: Math.max(box.left + 1, box.right - 2),
+    bottom: Math.max(box.top + 1, box.bottom - 10),
+  };
+  if (controls) {
+    var controlsRect = controls.getBoundingClientRect();
+    if (Number.isFinite(controlsRect.top)) {
+      guarded.bottom = Math.min(guarded.bottom, Math.max(guarded.top + 1, Math.round(controlsRect.top) - 18));
+    }
+  }
+  return guarded;
 }
 
 function getPlayerViewportSize() {
@@ -152,6 +170,8 @@ function scheduleMpvBoundsSync() {
   syncMpvBounds();
   setTimeout(syncMpvBounds, 80);
   setTimeout(syncMpvBounds, 240);
+  setTimeout(syncMpvBounds, 600);
+  setTimeout(syncMpvBounds, 1000);
 }
 
 async function openPlayerWithEpisode(ep, title, mode) {
@@ -182,10 +202,12 @@ async function openPlayerWithEpisode(ep, title, mode) {
     await setPlayerVolume(document.getElementById('playerVolume').value);
     await updateMuteFromMpv();
     await pollMpvStatus();
+    var tick = 0;
     state.player.timer = setInterval(function(){
       syncMpvBounds();
-      pollMpvStatus();
-    }, 500);
+      tick += 1;
+      if (tick % 2 === 0) pollMpvStatus();
+    }, 250);
   } catch(e) {
     document.getElementById('mpvHint').textContent = 'mpv 未启动';
     playerMessage('err', String(e));
