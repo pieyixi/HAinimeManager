@@ -1,5 +1,19 @@
 /// Import a work from a directory following the standard format:
 ///   dir/data/meta.json, dir/data/cover.jpg, dir/data/cover_epN.png, dir/作品名 #N.mp4
+fn ensure_tag(conn: &Connection, name: &str, category: &str) -> Result<i64, String> {
+    conn.execute(
+        "INSERT INTO Tags (Name, Category) VALUES (?1, ?2)
+         ON CONFLICT(Name) DO UPDATE SET Category=excluded.Category
+         WHERE Tags.Category <> excluded.Category",
+        params![name, category],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.query_row("SELECT Id FROM Tags WHERE Name=?1", params![name], |r| {
+        r.get::<_, i64>(0)
+    })
+    .map_err(|e| e.to_string())
+}
+
 fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
     let path = std::path::Path::new(dir_path);
     if !path.is_dir() {
@@ -135,16 +149,7 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
                                 continue;
                             }
                             // Episode tags are stored as work tags (simplified)
-                            conn.execute(
-                                "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)",
-                                params![n, category],
-                            )
-                            .ok();
-                            if let Ok(tid) = conn.query_row(
-                                "SELECT Id FROM Tags WHERE Name=?1",
-                                params![n],
-                                |r| r.get::<_, i64>(0),
-                            ) {
+                            if let Ok(tid) = ensure_tag(conn, n, category) {
                                 conn.execute("INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)", params![work_id, tid]).ok();
                             }
                         }
@@ -176,16 +181,7 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
                 if n.is_empty() {
                     continue;
                 }
-                conn.execute(
-                    "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)",
-                    params![n, category],
-                )
-                .ok();
-                if let Ok(tid) =
-                    conn.query_row("SELECT Id FROM Tags WHERE Name=?1", params![n], |r| {
-                        r.get::<_, i64>(0)
-                    })
-                {
+                if let Ok(tid) = ensure_tag(conn, n, category) {
                     conn.execute(
                         "INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
                         params![work_id, tid],
@@ -203,14 +199,7 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
             if n.is_empty() {
                 continue;
             }
-            conn.execute(
-                "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, '人物')",
-                params![n],
-            )
-            .ok();
-            if let Ok(tid) = conn.query_row("SELECT Id FROM Tags WHERE Name=?1", params![n], |r| {
-                r.get::<_, i64>(0)
-            }) {
+            if let Ok(tid) = ensure_tag(conn, n, "人物") {
                 conn.execute(
                     "INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
                     params![work_id, tid],
