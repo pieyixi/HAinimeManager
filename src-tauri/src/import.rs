@@ -76,6 +76,8 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         (2024, 1)
     };
 
+    let videos = collect_numbered_video_paths(path)?;
+
     let work_id: i64 = if let Some(existing_id) = existing_id {
         conn.execute(
             "UPDATE Works SET Title=?1,Year=?2,Month=?3,Studio=?4,Description=?5,FolderPath=?6,CoverPath=NULL,UpdatedAt=datetime('now','localtime') WHERE Id=?7",
@@ -92,33 +94,13 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         conn.last_insert_rowid()
     };
 
-    // Scan videos
-    let mut videos: Vec<_> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let p = entry.path();
-            if p.is_file() {
-                let ext = p
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                if matches!(
-                    ext.as_str(),
-                    "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"
-                ) {
-                    videos.push(p);
-                }
-            }
-        }
-    }
-    videos.sort();
-
     for (i, vpath) in videos.iter().enumerate() {
         let num = (i + 1) as i32;
-        // Get subtitle from episode_list if available
-        let subtitle = episode_list
-            .get(i)
+        let ep_meta = episode_list
+            .iter()
+            .find(|e| e.id == Some(num))
+            .or_else(|| episode_list.get(i));
+        let subtitle = ep_meta
             .and_then(|e| e.subtitle.clone())
             .unwrap_or_default();
         let ep_title = if subtitle.is_empty() {
@@ -142,7 +124,7 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         }
 
         // Episode-level tags (theme->剧情, attribute->属性, scene->场景)
-        if let Some(ep_meta) = episode_list.get(i) {
+        if let Some(ep_meta) = ep_meta {
             if let Some(ref ep_tags) = ep_meta.tags {
                 let ep_cat_map = [("theme", "剧情"), ("attribute", "属性"), ("scene", "场景")];
                 for (key, category) in &ep_cat_map {

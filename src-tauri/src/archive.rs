@@ -1,15 +1,3 @@
-fn is_video_file(path: &std::path::Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|s| {
-            matches!(
-                s.to_lowercase().as_str(),
-                "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"
-            )
-        })
-        .unwrap_or(false)
-}
-
 fn find_existing_cover(data_dir: &std::path::Path, stem: &str) -> Option<String> {
     for ext in ["jpg", "png", "jpeg", "webp"] {
         let p = data_dir.join(format!("{}.{}", stem, ext));
@@ -57,6 +45,9 @@ fn archive_missing_reasons(dir_path: &str) -> Vec<String> {
 
     if !data_dir.exists() {
         reasons.push("缺少 data 文件夹".to_string());
+    }
+    if let Err(err) = collect_numbered_video_paths(path) {
+        reasons.push(err);
     }
     if !meta_path.exists() {
         reasons.push("缺少 data/meta.json".to_string());
@@ -238,13 +229,7 @@ fn make_archive_draft(
         .to_string();
     let data_dir = path.join("data");
 
-    let mut videos: Vec<_> = std::fs::read_dir(path)
-        .map_err(|e| e.to_string())?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && is_video_file(p))
-        .collect();
-    videos.sort();
+    let videos = collect_numbered_video_paths(path)?;
 
     let mut episode_list = videos
         .iter()
@@ -297,7 +282,12 @@ fn make_archive_draft(
             }
             if let Some(existing_episodes) = json.get("episode_list").and_then(|v| v.as_array()) {
                 for (idx, existing) in existing_episodes.iter().enumerate() {
-                    if let Some(ep) = episode_list.get_mut(idx) {
+                    let existing_id = existing
+                        .get("id")
+                        .and_then(|v| v.as_i64())
+                        .map(|v| v as i32)
+                        .unwrap_or((idx + 1) as i32);
+                    if let Some(ep) = episode_list.iter_mut().find(|ep| ep.id == existing_id) {
                         if let Some(value) = existing.get("subtitle").and_then(|v| v.as_str()) {
                             ep.subtitle = value.to_string();
                         }
@@ -462,6 +452,9 @@ fn validate_archive_meta_json(json: &serde_json::Value, dir_path: &str) -> Vec<S
     }
 
     let (video_count, _) = folder_video_stats(dir_path);
+    if let Err(err) = collect_numbered_video_paths(std::path::Path::new(dir_path)) {
+        reasons.push(err);
+    }
     if video_count > 0 && episode_len != video_count as usize {
         reasons.push("episode_list 数量必须等于视频数量".to_string());
     }
