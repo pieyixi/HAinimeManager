@@ -74,14 +74,13 @@ Get-Content src\js\state.js,src\js\navigation.js,src\js\filters.js,src\js\detail
 Rust check:
 
 ```powershell
-D:\Envirnment\rust\cargo\bin\cargo.exe check --manifest-path src-tauri\Cargo.toml
+cargo check --manifest-path src-tauri\Cargo.toml
 ```
 
 Release build:
 
 ```powershell
-$env:Path = 'D:\Envirnment\rust\cargo\bin;D:\Envirnment\msys2\mingw64\bin;' + $env:Path
-& C:\Users\翊兮\AppData\Roaming\npm\tauri.cmd build
+cargo tauri build
 ```
 
 ## Data Safety
