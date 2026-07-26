@@ -62,6 +62,34 @@ function handlePlayerKeydown(e) {
     e.preventDefault();
     return true;
   }
+  if (e.key === ',' || e.key === '.') {
+    if (!e.repeat) stepPlayerFrame(e.key === ',' ? -1 : 1);
+    e.preventDefault();
+    return true;
+  }
+  if (String(e.key).toLowerCase() === 'm') {
+    if (!e.repeat) toggleMute();
+    e.preventDefault();
+    return true;
+  }
+  if (String(e.key).toLowerCase() === 'f') {
+    if (!e.repeat) togglePlayerFullscreen();
+    e.preventDefault();
+    return true;
+  }
+  if (e.key === 'Enter' && state.player.mode === 'archive') {
+    if (!e.repeat) captureCurrentFrame();
+    e.preventDefault();
+    return true;
+  }
+  if (e.key === 'Escape') {
+    if (!e.repeat) {
+      if (state.player.fullscreen) setPlayerFullscreen(false);
+      else returnFromPlayer();
+    }
+    e.preventDefault();
+    return true;
+  }
   return false;
 }
 

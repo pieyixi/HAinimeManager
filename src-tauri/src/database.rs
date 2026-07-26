@@ -81,6 +81,12 @@ pub fn init_db() -> Database {
         CREATE TABLE IF NOT EXISTS AppSettings (
             Key TEXT PRIMARY KEY,
             Value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS LibrarySnapshots (
+            WorkId INTEGER PRIMARY KEY,
+            MetaSignature TEXT NOT NULL DEFAULT '',
+            CoverSignature TEXT NOT NULL DEFAULT '',
+            FOREIGN KEY (WorkId) REFERENCES Works(Id) ON DELETE CASCADE
         );",
     )
     .expect("Failed to create tables");

@@ -3,12 +3,17 @@
 function showPage(id) {
   document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
   document.getElementById(id).classList.add('active');
-  if (id !== 'page-player') document.body.classList.remove('player-mode');
+  if (id !== 'page-player') document.body.classList.remove('player-mode', 'player-fullscreen', 'player-archive-mode');
+  if (id === 'page-home') {
+    requestAnimationFrame(function(){
+      updatePageSize(true);
+      applyFilter();
+    });
+  }
 }
 
 function showHome() {
   showPage('page-home');
-  if (updatePageSize(true)) applyFilter();
 }
 
 function resetHomeFilters() {

@@ -173,6 +173,33 @@ pub struct UnarchivedFolder {
     pub missing_reasons: Vec<String>,
 }
 
+#[derive(Debug, Serialize, Clone, Default)]
+pub struct LibraryConsoleSummary {
+    pub archived_count: i64,
+    pub unarchived_count: i64,
+    pub episode_count: i64,
+    pub total_bytes: u64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct LibraryConsoleItem {
+    pub work_id: Option<i64>,
+    pub title: String,
+    pub folder_path: String,
+    pub status: String,
+    pub new_episode_numbers: Vec<i32>,
+    pub can_update: bool,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct LibraryConsoleScanResult {
+    pub summary: LibraryConsoleSummary,
+    pub changed_works: Vec<LibraryConsoleItem>,
+    pub new_episode_works: Vec<LibraryConsoleItem>,
+    pub new_complete_works: Vec<LibraryConsoleItem>,
+    pub attention_works: Vec<LibraryConsoleItem>,
+}
+
 // ─── Test Set Format Import ───────────────────────────────
 
 #[derive(Debug, Deserialize)]

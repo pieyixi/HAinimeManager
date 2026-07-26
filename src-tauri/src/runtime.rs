@@ -11,12 +11,13 @@ pub fn run() {
             get_tags,
             initialize_media_library,
             bind_media_library,
-            scan_folder,
             delete_work,
             open_folder,
             get_studios,
-            sync_database,
             batch_import_folders,
+            get_library_console_summary,
+            scan_library_changes,
+            apply_library_updates,
             prepare_temp_frame_capture,
             read_image_data,
             backup_database,
@@ -33,6 +34,7 @@ pub fn run() {
             detect_duplicates,
             list_unarchived_folders,
             play_video,
+            set_player_fullscreen,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -136,6 +136,40 @@ fn get_tags(db: State<Database>) -> Result<Vec<Tag>, String> {
     Ok(tags)
 }
 
+fn imported_work_is_available(
+    conn: &Connection,
+    work_id: i64,
+    folder_path: &str,
+    cover_path: Option<&str>,
+) -> bool {
+    if !std::path::Path::new(folder_path).is_dir()
+        || !cover_path
+            .map(|path| std::path::Path::new(path).is_file())
+            .unwrap_or(false)
+    {
+        return false;
+    }
+    let Ok(mut statement) = conn.prepare(
+        "SELECT VideoPath, CoverPath FROM Episodes WHERE WorkId=?1 ORDER BY Number",
+    ) else {
+        return false;
+    };
+    let Ok(rows) = statement.query_map(params![work_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    }) else {
+        return false;
+    };
+    let episodes: Vec<(String, Option<String>)> = rows.filter_map(Result::ok).collect();
+    !episodes.is_empty()
+        && episodes.iter().all(|(video, cover)| {
+            std::path::Path::new(video).is_file()
+                && cover
+                    .as_deref()
+                    .map(|path| std::path::Path::new(path).is_file())
+                    .unwrap_or(false)
+        })
+}
+
 #[tauri::command]
 fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -200,7 +234,9 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
 
     let result: Vec<WorkWithTags> = works
         .into_iter()
-        .filter(|(_, _, _, _, _, _, _, folder_path, _)| is_archive_complete(folder_path))
+        .filter(|(id, _, _, _, _, _, cover_path, folder_path, _)| {
+            imported_work_is_available(&conn, *id, folder_path, cover_path.as_deref())
+        })
         .map(
             |(
                 id,
@@ -235,72 +271,15 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
 }
 
 #[tauri::command]
-fn scan_folder(root_path: String, db: State<Database>) -> Result<Vec<String>, String> {
-    let path = std::path::Path::new(&root_path);
-    if !path.exists() {
-        return Err("路径不存在".to_string());
-    }
-
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT FolderPath FROM Works")
-        .map_err(|e| e.to_string())?;
-    let existing: Vec<String> = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .map(|p| p.to_lowercase())
-        .collect();
-
-    let mut found = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let dir_path = entry.path();
-            // Check if dir has videos OR has data/ subdir
-            let has_video = std::fs::read_dir(&dir_path)
-                .ok()
-                .map(|entries| {
-                    entries.flatten().any(|e| {
-                        e.path().is_file() && {
-                            let ext = e
-                                .path()
-                                .extension()
-                                .and_then(|e| e.to_str())
-                                .unwrap_or("")
-                                .to_lowercase();
-                            matches!(
-                                ext.as_str(),
-                                "mp4" | "mkv" | "avi" | "wmv" | "flv" | "mov" | "webm"
-                            )
-                        }
-                    })
-                })
-                .unwrap_or(false);
-            let archive_complete = is_archive_complete(&dir_path.to_string_lossy());
-
-            if has_video && archive_complete {
-                // Return FULL PATH, not just name
-                let folder = dir_path.to_string_lossy().to_string();
-                if !existing.iter().any(|p| p == &folder.to_lowercase()) {
-                    found.push(folder);
-                }
-            }
-        }
-    }
-    Ok(found)
-}
-
-#[tauri::command]
 fn import_work_via_json(dir_path: String, db: State<Database>) -> Result<i64, String> {
     let missing = archive_missing_reasons(&dir_path);
     if !missing.is_empty() {
         return Err(format!("建档未完整: {}", missing.join("、")));
     }
     let d = db.conn.lock().map_err(|e| e.to_string())?;
-    import_work_dir(&d, &dir_path)
+    let work_id = import_work_dir(&d, &dir_path)?;
+    save_library_snapshot(&d, work_id, &dir_path)?;
+    Ok(work_id)
 }
 
 fn read_work_release_months(folder_path: &str, fallback_year: i32, fallback_month: i32) -> Vec<String> {
@@ -351,5 +330,59 @@ fn open_folder(path: String) -> Result<(), String> {
         .spawn()
         .map_err(|e| format!("打开文件夹失败: {}", e))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod imported_work_visibility_tests {
+    use super::imported_work_is_available;
+    use rusqlite::{params, Connection};
+
+    #[test]
+    fn ignores_extra_unimported_videos_when_existing_assets_are_present() {
+        let root = std::env::temp_dir().join(format!(
+            "hanime-manager-visible-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        let cover = root.join("data/cover.jpg");
+        let episode_cover = root.join("data/cover_ep1.jpg");
+        let imported_video = root.join("title #1.mp4");
+        let extra_video = root.join("title #2.mp4");
+        for path in [&cover, &episode_cover, &imported_video, &extra_video] {
+            std::fs::write(path, b"test").unwrap();
+        }
+
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE Episodes (
+                Id INTEGER PRIMARY KEY,
+                WorkId INTEGER NOT NULL,
+                Number INTEGER NOT NULL,
+                VideoPath TEXT NOT NULL,
+                CoverPath TEXT
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO Episodes (WorkId, Number, VideoPath, CoverPath) VALUES (1, 1, ?1, ?2)",
+            params![
+                imported_video.to_string_lossy().to_string(),
+                episode_cover.to_string_lossy().to_string()
+            ],
+        )
+        .unwrap();
+
+        assert!(imported_work_is_available(
+            &conn,
+            1,
+            &root.to_string_lossy(),
+            Some(&cover.to_string_lossy())
+        ));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 

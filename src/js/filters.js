@@ -201,7 +201,10 @@ function applyFilter() {
   }
 
   var kw = (searchInput?.value || '').trim().toLowerCase();
-  if (clearBtn) clearBtn.classList.toggle('visible', !!kw);
+  var hasFilters = Object.keys(state.activeFilters).some(function(key){
+    return state.activeFilters[key] && Object.keys(state.activeFilters[key]).length > 0;
+  });
+  if (clearBtn) clearBtn.classList.toggle('visible', !!kw || hasFilters);
   if (kw) {
     results = results.filter(function(w){
       if (w.title.toLowerCase().indexOf(kw) >= 0) return true;
@@ -240,7 +243,9 @@ function clearSearch() {
   var input = document.getElementById('searchInput');
   if (!input) return;
   input.value = '';
+  state.activeFilters = {};
   state.currentPage = 1;
+  closeDropdown();
   applyFilter();
   input.focus();
 }

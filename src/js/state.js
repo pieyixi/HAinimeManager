@@ -20,6 +20,7 @@ var state = {
   unarchivedScrollTop: 0,
   unarchivedActiveIndex: '',
   scanFolders: [],
+  libraryScan: null,
   contextWorkId: null,
   confirmResolver: null,
   mediaLibrary: null,
@@ -28,6 +29,13 @@ var state = {
     timer: null,
     currentTime: 0,
     duration: 0,
+    paused: false,
+    speed: 1,
+    fitMode: 'contain',
+    fullscreen: false,
+    sidebarCollapsed: false,
+    loopMode: 'off',
+    handlingEnd: false,
     libmpvReady: false,
     muted: false,
     mode: 'detail',
@@ -61,6 +69,9 @@ function measurePageSize() {
   var style = window.getComputedStyle(grid);
   var contentWidth = grid.clientWidth - readPx(style, 'paddingLeft') - readPx(style, 'paddingRight');
   var contentHeight = grid.clientHeight - readPx(style, 'paddingTop') - readPx(style, 'paddingBottom');
+  if (contentWidth < GRID_METRICS.cardWidth || contentHeight < GRID_METRICS.cardHeight) {
+    return state.pageSize || 20;
+  }
   var columns = Math.max(1, Math.floor((contentWidth + GRID_METRICS.gap) / (GRID_METRICS.cardWidth + GRID_METRICS.gap)));
   var rows = Math.max(1, Math.floor((contentHeight + GRID_METRICS.gap) / (GRID_METRICS.cardHeight + GRID_METRICS.gap)));
   return Math.max(1, columns * rows);

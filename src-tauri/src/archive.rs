@@ -132,10 +132,6 @@ fn archive_missing_reasons(dir_path: &str) -> Vec<String> {
     reasons
 }
 
-fn is_archive_complete(dir_path: &str) -> bool {
-    archive_missing_reasons(dir_path).is_empty()
-}
-
 fn image_ext_from_data(data: &[u8]) -> &'static str {
     if data.len() > 3 && &data[0..3] == b"\xFF\xD8\xFF" {
         "jpg"

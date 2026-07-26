@@ -145,11 +145,17 @@ function summarizeUnarchivedReasons(item) {
 async function loadUnarchivedFolders() {
   var path = document.getElementById('unarchivedPath').value.trim();
   var box = document.getElementById('unarchivedList');
-  if (!path) return;
+  var count = document.getElementById('unarchivedCount');
+  if (!path) {
+    if (count) count.textContent = '（共0部）';
+    return;
+  }
+  if (count) count.textContent = '（扫描中）';
   document.getElementById('unarchivedIndex').innerHTML = '';
   box.innerHTML = '<div class="settings-msg info">扫描未建档作品中...</div>';
   try {
     var folders = await invoke('list_unarchived_folders', { rootPath: path });
+    if (count) count.textContent = '（共' + folders.length + '部）';
     if (!folders.length) {
       document.getElementById('unarchivedIndex').innerHTML = '';
       box.innerHTML = '<div class="settings-msg info">没有未建档作品</div>';
@@ -198,15 +204,16 @@ async function loadUnarchivedFolders() {
       updateUnarchivedIndexFromScroll();
     });
   } catch(e) {
+    if (count) count.textContent = '（扫描失败）';
     document.getElementById('unarchivedIndex').innerHTML = '';
     box.innerHTML = '<div class="settings-msg err">扫描失败: ' + escHtml(e) + '</div>';
   }
 }
 
-async function openArchiveAssistant(dirPath) {
+async function openArchiveAssistant(dirPath, focusEpisode) {
   var unarchivedList = document.getElementById('unarchivedList');
   if (unarchivedList) state.unarchivedScrollTop = unarchivedList.scrollTop;
-  state.archive = { draft: null, coverData: null, episodeCoverData: {}, dataPath: '' };
+  state.archive = { draft: null, coverData: null, episodeCoverData: {}, dataPath: '', focusEpisode: focusEpisode || null };
   document.getElementById('archiveDir').value = dirPath || '';
   document.getElementById('archiveTitle').value = '';
   document.getElementById('archiveStudio').value = '';
@@ -291,6 +298,16 @@ function renderArchiveEpisodes() {
     '</div>';
   }).join('');
   setupArchiveDropZones();
+  if (state.archive.focusEpisode) {
+    var target = box.querySelector('.episode-editor[data-ep="' + state.archive.focusEpisode + '"]');
+    state.archive.focusEpisode = null;
+    if (target) {
+      requestAnimationFrame(function(){
+        target.classList.add('archive-focus');
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  }
 }
 
 function setupArchiveDropZones() {

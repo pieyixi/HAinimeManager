@@ -1,93 +1,26 @@
 #[tauri::command]
-fn sync_database(root_path: String, db: State<Database>) -> Result<SyncResult, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let path = std::path::Path::new(&root_path);
-    let mut disk_folders = Vec::new();
-    if path.exists() {
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                if entry.path().is_dir() {
-                    let has = std::fs::read_dir(entry.path())
-                        .ok()
-                        .map(|e| {
-                            e.flatten().any(|f| {
-                                f.path().is_file()
-                                    && f.path()
-                                        .extension()
-                                        .and_then(|e| e.to_str())
-                                        .map(|s| {
-                                            matches!(
-                                                s.to_lowercase().as_str(),
-                                                "mp4"
-                                                    | "mkv"
-                                                    | "avi"
-                                                    | "wmv"
-                                                    | "flv"
-                                                    | "mov"
-                                                    | "webm"
-                                            )
-                                        })
-                                        .unwrap_or(false)
-                            })
-                        })
-                        .unwrap_or(false);
-                    let archive_complete = is_archive_complete(&entry.path().to_string_lossy());
-                    if has && archive_complete {
-                        disk_folders.push(entry.path().to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
-    }
-    let mut stmt = conn
-        .prepare("SELECT FolderPath FROM Works")
-        .map_err(|e| e.to_string())?;
-    let db_folders: Vec<String> = stmt
-        .query_map([], |r| r.get(0))
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-    let new_folders: Vec<_> = disk_folders
-        .iter()
-        .filter(|d| !db_folders.iter().any(|b| b.eq_ignore_ascii_case(d)))
-        .cloned()
-        .collect();
-    let mut missing = Vec::new();
-    for fp in &db_folders {
-        if !std::path::Path::new(fp).exists() {
-            if let Ok(w) = conn.query_row(
-                "SELECT Id,Title,Year,Month,Studio,Description,CoverPath,FolderPath,(SELECT COUNT(*) FROM Episodes WHERE WorkId=w.Id) FROM Works w WHERE FolderPath=?1",
-                params![fp],
-                |row| Ok(Work{id:row.get(0)?,title:row.get(1)?,year:row.get(2)?,month:row.get(3)?,studio:row.get(4)?,description:row.get(5)?,cover_path:row.get(6)?,folder_path:row.get(7)?,episode_count:row.get(8)?})
-            ) { missing.push(w); }
-        }
-    }
-    Ok(SyncResult {
-        new_folders,
-        missing_works: missing,
-    })
-}
-
-#[tauri::command]
 fn batch_import_folders(folders: Vec<String>, db: State<Database>) -> Result<i32, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let transaction = conn.transaction().map_err(|e| e.to_string())?;
     let mut count = 0;
     for fp in folders {
         let missing = archive_missing_reasons(&fp);
         if !missing.is_empty() {
             return Err(format!("{} 建档未完整: {}", fp, missing.join("、")));
         }
-        let before: i64 = conn
+        let before: i64 = transaction
             .query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0))
             .unwrap_or(0);
-        import_work_dir(&conn, &fp)?;
-        let after: i64 = conn
+        let work_id = import_work_dir(&transaction, &fp)?;
+        save_library_snapshot(&transaction, work_id, &fp)?;
+        let after: i64 = transaction
             .query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0))
             .unwrap_or(before);
         if after > before {
             count += 1;
         }
     }
+    transaction.commit().map_err(|e| e.to_string())?;
     Ok(count)
 }
 

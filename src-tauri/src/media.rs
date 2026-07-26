@@ -13,7 +13,6 @@ fn prepare_temp_frame_capture() -> Result<CapturePath, String> {
             .to_string(),
     })
 }
-
 #[tauri::command]
 fn read_image_data(path: String) -> Result<CapturedFrameData, String> {
     use base64::Engine as _;
@@ -79,8 +78,48 @@ fn get_studios(db: State<Database>) -> Result<Vec<String>, String> {
     Ok(studios)
 }
 
-#[derive(Serialize)]
-struct SyncResult {
-    new_folders: Vec<String>,
-    missing_works: Vec<Work>,
+#[derive(Clone, Copy)]
+struct PlayerWindowPlacement {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    was_maximized: bool,
+}
+
+static PLAYER_WINDOW_PLACEMENT: std::sync::OnceLock<
+    std::sync::Mutex<Option<PlayerWindowPlacement>>,
+> = std::sync::OnceLock::new();
+
+#[tauri::command]
+fn set_player_fullscreen(window: tauri::Window, enabled: bool) -> Result<(), String> {
+    let placement = PLAYER_WINDOW_PLACEMENT.get_or_init(|| std::sync::Mutex::new(None));
+    if enabled {
+        let position = window.outer_position().map_err(|e| e.to_string())?;
+        let size = window.inner_size().map_err(|e| e.to_string())?;
+        let was_maximized = window.is_maximized().map_err(|e| e.to_string())?;
+        *placement.lock().map_err(|e| e.to_string())? = Some(PlayerWindowPlacement {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+            was_maximized,
+        });
+        window.set_fullscreen(true).map_err(|e| e.to_string())?;
+    } else {
+        let previous = placement.lock().map_err(|e| e.to_string())?.take();
+        window.set_fullscreen(false).map_err(|e| e.to_string())?;
+        if previous.map(|value| value.was_maximized).unwrap_or(false) {
+            window.maximize().map_err(|e| e.to_string())?;
+        } else if let Some(previous) = previous {
+            window.unmaximize().map_err(|e| e.to_string())?;
+            window
+                .set_position(tauri::PhysicalPosition::new(previous.x, previous.y))
+                .map_err(|e| e.to_string())?;
+            window
+                .set_size(tauri::PhysicalSize::new(previous.width, previous.height))
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
