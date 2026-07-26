@@ -47,6 +47,7 @@ pub struct WorkWithTags {
     pub cover_path: Option<String>,
     pub folder_path: String,
     pub episode_count: i64,
+    pub release_dates: Vec<String>,
     pub tags: Vec<Tag>,
 }
 

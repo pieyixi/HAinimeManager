@@ -66,20 +66,6 @@ fn play_video(video_path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_years(db: State<Database>) -> Result<Vec<i32>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT DISTINCT Year FROM Works ORDER BY Year DESC")
-        .map_err(|e| e.to_string())?;
-    let years = stmt
-        .query_map([], |r| r.get(0))
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(years)
-}
-
-#[tauri::command]
 fn get_studios(db: State<Database>) -> Result<Vec<String>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn

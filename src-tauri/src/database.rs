@@ -77,6 +77,10 @@ pub fn init_db() -> Database {
             PRIMARY KEY (WorkId, TagId),
             FOREIGN KEY (WorkId) REFERENCES Works(Id) ON DELETE CASCADE,
             FOREIGN KEY (TagId) REFERENCES Tags(Id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS AppSettings (
+            Key TEXT PRIMARY KEY,
+            Value TEXT NOT NULL
         );",
     )
     .expect("Failed to create tables");

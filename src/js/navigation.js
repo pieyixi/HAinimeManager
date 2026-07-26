@@ -86,13 +86,22 @@ async function init() {
     var results = await Promise.all([
       invoke('get_all_works_with_tags'),
       invoke('get_tags'),
-      invoke('get_years'),
       invoke('get_studios'),
     ]);
     state.works = results[0] || [];
     state.tags = results[1] || [];
-    state.years = results[2] || [];
-    state.studios = results[3] || [];
+    var yearSet = {};
+    state.works.forEach(function(w){
+      var dates = Array.isArray(w.release_dates) && w.release_dates.length
+        ? w.release_dates
+        : [String(w.year)];
+      dates.forEach(function(date){
+        var year = parseInt(String(date).slice(0, 4), 10);
+        if (Number.isFinite(year)) yearSet[year] = true;
+      });
+    });
+    state.years = Object.keys(yearSet).map(Number).sort(function(a,b){ return b - a; });
+    state.studios = results[2] || [];
 
     var coverPaths = [];
     state.works.forEach(function(w){ if(w.cover_path) coverPaths.push(w.cover_path); });

@@ -22,30 +22,158 @@ function showJsonPasteMsg(kind, text) {
 }
 
 async function openUnarchivedPage() {
+  var returningFromArchive = document.getElementById('page-archive').classList.contains('active');
+  if (!returningFromArchive) {
+    state.unarchivedScrollTop = 0;
+    state.unarchivedActiveIndex = '';
+  }
   document.getElementById('unarchivedPath').value = document.getElementById('mediaPath').value.trim() || 'D:\\HAnime';
   showPage('page-unarchived');
   await loadUnarchivedFolders();
+}
+
+var unarchivedCollator = new Intl.Collator('zh-CN-u-co-pinyin', {
+  numeric: true,
+  sensitivity: 'base',
+});
+var unarchivedIndexLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
+var pinyinBoundaries = '阿八嚓哒妸发旮哈讥咔垃妈拿哦啪期然撒塌挖昔压匝';
+var pinyinBoundaryLetters = 'ABCDEFGHJKLMNOPQRSTWXYZ';
+
+function firstIndexableCharacter(title) {
+  var normalized = String(title || '').normalize('NFKC').trim();
+  for (var ch of normalized) {
+    if (/[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/.test(ch)) return ch;
+  }
+  return '';
+}
+
+function kanaIndexLetter(ch) {
+  var groups = {
+    A: 'あぁアァ', E: 'えぇエェ', I: 'いぃイィ', O: 'おぉオォ', U: 'うぅウゥ',
+    B: 'ばびぶべぼバビブベボ', C: 'ちチ', D: 'だでどダデド',
+    F: 'ふフ', G: 'がぎぐげごガギグゲゴ', H: 'はひへほハヒヘホ',
+    J: 'じぢジヂ', K: 'かきくけこゕゖカキクケコヵヶ', M: 'まみむめもマミムメモ',
+    N: 'なにぬねのんナニヌネノン', P: 'ぱぴぷぺぽパピプペポ',
+    R: 'らりるれろラリルレロ', S: 'さしすせそサシスセソ',
+    T: 'たつてとっタツテトッ', V: 'ゔヴ',
+    W: 'わをゐゑゎワヲヰヱヮ', Y: 'やゆよゃゅょヤユヨャュョ',
+    Z: 'ざずぜぞづザズゼゾヅ',
+  };
+  for (var letter in groups) {
+    if (groups[letter].indexOf(ch) >= 0) return letter;
+  }
+  return '';
+}
+
+function hanIndexLetter(ch) {
+  for (var i = pinyinBoundaries.length - 1; i >= 0; i--) {
+    if (unarchivedCollator.compare(ch, pinyinBoundaries[i]) >= 0) {
+      return pinyinBoundaryLetters[i];
+    }
+  }
+  return '';
+}
+
+function getUnarchivedIndexLetter(title) {
+  var ch = firstIndexableCharacter(title);
+  if (!ch || /[0-9]/.test(ch)) return '#';
+  if (/[A-Za-z]/.test(ch)) return ch.toUpperCase();
+  if (/[\u3040-\u30ff]/.test(ch)) return kanaIndexLetter(ch) || '#';
+  if (/[\u3400-\u9fff\uf900-\ufaff]/.test(ch)) return hanIndexLetter(ch) || '#';
+  return '#';
+}
+
+function renderUnarchivedIndex(available) {
+  var index = document.getElementById('unarchivedIndex');
+  index.innerHTML = unarchivedIndexLetters.map(function(letter){
+    var disabled = !available[letter];
+    return '<button class="unarchived-index-btn" data-letter="' + letter + '"' +
+      (disabled ? ' disabled' : '') + ' onclick="scrollToUnarchivedIndex(\'' + letter + '\')">' + letter + '</button>';
+  }).join('');
+}
+
+function setUnarchivedActiveIndex(letter) {
+  state.unarchivedActiveIndex = letter || '';
+  document.querySelectorAll('.unarchived-index-btn').forEach(function(button){
+    button.classList.toggle('active', button.getAttribute('data-letter') === letter);
+  });
+}
+
+function scrollToUnarchivedIndex(letter) {
+  var box = document.getElementById('unarchivedList');
+  var anchor = box.querySelector('[data-index-anchor="' + letter + '"]');
+  if (!anchor) return;
+  setUnarchivedActiveIndex(letter);
+  box.scrollTo({ top: Math.max(0, anchor.offsetTop - 6), behavior: 'smooth' });
+}
+
+var unarchivedScrollFrame = null;
+function updateUnarchivedIndexFromScroll() {
+  var box = document.getElementById('unarchivedList');
+  state.unarchivedScrollTop = box.scrollTop;
+  var anchors = Array.from(box.querySelectorAll('[data-index-anchor]'));
+  if (!anchors.length) return;
+  var current = anchors[0].getAttribute('data-index-anchor');
+  var threshold = box.scrollTop + 18;
+  anchors.forEach(function(anchor){
+    if (anchor.offsetTop <= threshold) current = anchor.getAttribute('data-index-anchor');
+  });
+  setUnarchivedActiveIndex(current);
+}
+
+function handleUnarchivedScroll() {
+  if (unarchivedScrollFrame) cancelAnimationFrame(unarchivedScrollFrame);
+  unarchivedScrollFrame = requestAnimationFrame(updateUnarchivedIndexFromScroll);
+}
+
+function summarizeUnarchivedReasons(item) {
+  var reasons = item.missing_reasons || [];
+  var summary = [];
+  function add(text) { if (summary.indexOf(text) < 0) summary.push(text); }
+  if (!item.has_data_dir) add('缺少 data 文件夹');
+  if (!item.has_meta_json) add('缺少 meta.json');
+  if (reasons.some(function(reason){ return /视频.*编号|编号.*视频/.test(reason); })) add('视频编号有误');
+  if (reasons.indexOf('缺少主封面') >= 0) add('缺少主封面');
+  if (reasons.some(function(reason){ return /^缺少第\d+集封面$/.test(reason); })) add('集数封面不齐全');
+  if (item.has_meta_json && reasons.some(function(reason){
+    return !/视频.*编号|编号.*视频/.test(reason) && reason !== '缺少主封面' && !/^缺少第\d+集封面$/.test(reason);
+  })) add('meta.json 不完整');
+  return summary;
 }
 
 async function loadUnarchivedFolders() {
   var path = document.getElementById('unarchivedPath').value.trim();
   var box = document.getElementById('unarchivedList');
   if (!path) return;
+  document.getElementById('unarchivedIndex').innerHTML = '';
   box.innerHTML = '<div class="settings-msg info">扫描未建档作品中...</div>';
   try {
     var folders = await invoke('list_unarchived_folders', { rootPath: path });
     if (!folders.length) {
+      document.getElementById('unarchivedIndex').innerHTML = '';
       box.innerHTML = '<div class="settings-msg info">没有未建档作品</div>';
       return;
     }
+    folders.forEach(function(item){ item.index_letter = getUnarchivedIndexLetter(item.title); });
+    folders.sort(function(a, b){
+      var rankA = unarchivedIndexLetters.indexOf(a.index_letter);
+      var rankB = unarchivedIndexLetters.indexOf(b.index_letter);
+      return rankA - rankB || unarchivedCollator.compare(a.title, b.title);
+    });
+    var available = {};
+    folders.forEach(function(item){ available[item.index_letter] = true; });
+    renderUnarchivedIndex(available);
     var html = '<div class="unarchived-list">';
+    var currentLetter = '';
     folders.forEach(function(item){
-      var reasons = (item.missing_reasons || []).slice(0, 8).map(function(reason){
+      if (item.index_letter !== currentLetter) {
+        currentLetter = item.index_letter;
+        html += '<div class="unarchived-anchor" data-index-anchor="' + currentLetter + '">' + currentLetter + '</div>';
+      }
+      var reasons = summarizeUnarchivedReasons(item).map(function(reason){
         return '<span class="reason-pill">' + escHtml(reason) + '</span>';
       }).join('');
-      if ((item.missing_reasons || []).length > 8) {
-        reasons += '<span class="reason-pill">还有 ' + ((item.missing_reasons || []).length - 8) + ' 项</span>';
-      }
       html += '<div class="unarchived-card">' +
         '<div>' +
           '<div class="unarchived-name">' + escHtml(item.title) + '</div>' +
@@ -53,7 +181,7 @@ async function loadUnarchivedFolders() {
         '</div>' +
         '<div class="unarchived-meta">' +
           '<span class="status-pill">' + item.video_count + ' 个视频</span>' +
-          '<span class="status-pill warn">' + (item.has_meta_json ? 'meta 不完整' : '未建档') + '</span>' +
+          '<span class="status-pill warn">' + (item.has_meta_json ? '待补齐' : '未建档') + '</span>' +
         '</div>' +
         '<div class="reason-list">' + reasons + '</div>' +
         '<div class="unarchived-actions">' +
@@ -63,15 +191,23 @@ async function loadUnarchivedFolders() {
     });
     html += '</div>';
     box.innerHTML = html;
+    box.onscroll = handleUnarchivedScroll;
+    requestAnimationFrame(function(){
+      var maxScroll = Math.max(0, box.scrollHeight - box.clientHeight);
+      box.scrollTop = Math.min(state.unarchivedScrollTop || 0, maxScroll);
+      updateUnarchivedIndexFromScroll();
+    });
   } catch(e) {
+    document.getElementById('unarchivedIndex').innerHTML = '';
     box.innerHTML = '<div class="settings-msg err">扫描失败: ' + escHtml(e) + '</div>';
   }
 }
 
-function openArchiveAssistant(dirPath) {
-  state.archive = { draft: null, coverData: null, episodeCoverData: {} };
+async function openArchiveAssistant(dirPath) {
+  var unarchivedList = document.getElementById('unarchivedList');
+  if (unarchivedList) state.unarchivedScrollTop = unarchivedList.scrollTop;
+  state.archive = { draft: null, coverData: null, episodeCoverData: {}, dataPath: '' };
   document.getElementById('archiveDir').value = dirPath || '';
-  document.getElementById('archiveOfficialTitle').value = '';
   document.getElementById('archiveTitle').value = '';
   document.getElementById('archiveStudio').value = '';
   document.getElementById('archiveCharacters').value = '';
@@ -83,15 +219,21 @@ function openArchiveAssistant(dirPath) {
   document.getElementById('jsonPasteMsg').innerHTML = '';
   showPage('page-archive');
   setupArchiveDropZones();
-  if (dirPath) loadArchiveDraft();
+  if (dirPath) {
+    try {
+      state.archive.dataPath = await invoke('ensure_archive_data_dir', { dirPath: dirPath });
+      await loadArchiveDraft();
+    } catch(e) {
+      showArchiveMsg('err', '准备 data 文件夹失败: ' + e);
+    }
+  }
 }
 
 async function loadArchiveDraft() {
   var dirPath = document.getElementById('archiveDir').value.trim();
-  var title = document.getElementById('archiveOfficialTitle').value.trim();
   if (!dirPath) { showArchiveMsg('err', '请先填写作品目录'); return; }
   try {
-    var draft = await invoke('inspect_archive_folder', { dirPath: dirPath, title: title || null });
+    var draft = await invoke('inspect_archive_folder', { dirPath: dirPath });
     state.archive.draft = draft;
     document.getElementById('archiveTitle').value = draft.title || '';
     document.getElementById('archiveStudio').value = draft.studio || '';
@@ -274,6 +416,70 @@ async function savePastedArchiveJson() {
     }
   } catch(e) {
     showJsonPasteMsg('err', '保存失败: ' + (e.message || e));
+  }
+}
+
+function openArchiveWorkFolder() {
+  var dirPath = document.getElementById('archiveDir').value.trim();
+  if (dirPath) openWorkFolder(dirPath);
+}
+
+async function refreshArchiveDraft(button) {
+  var dirPath = document.getElementById('archiveDir').value.trim();
+  if (!dirPath) return;
+  var original = button.textContent;
+  button.disabled = true;
+  button.textContent = '刷新中';
+  try {
+    var oldDraft = state.archive.draft;
+    if (oldDraft) {
+      if (oldDraft.cover_path) delete state.coverCache[oldDraft.cover_path];
+      (oldDraft.episode_list || []).forEach(function(ep){
+        if (ep.cover_path) delete state.coverCache[ep.cover_path];
+      });
+      clearArchiveCoverCaches(dirPath, oldDraft.episode_list || []);
+    }
+    state.archive.coverData = null;
+    state.archive.episodeCoverData = {};
+    document.getElementById('archiveJsonPaste').value = '';
+    document.getElementById('jsonPasteMsg').innerHTML = '';
+    renderCoverDrop('');
+    await loadArchiveDraft();
+  } finally {
+    button.disabled = false;
+    button.textContent = original;
+  }
+}
+
+async function copyArchiveDataPath(button) {
+  var dirPath = document.getElementById('archiveDir').value.trim();
+  var dataPath = state.archive.dataPath || (dirPath.replace(/[\\/]+$/, '') + '\\data');
+  if (!dirPath) return;
+  try {
+    var copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(dataPath);
+        copied = true;
+      } catch (_) {}
+    }
+    if (!copied) {
+      var textarea = document.createElement('textarea');
+      textarea.value = dataPath;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      copied = document.execCommand('copy');
+      textarea.remove();
+      if (!copied) throw new Error('复制失败');
+    }
+    var original = button.textContent;
+    button.textContent = '已复制';
+    button.disabled = true;
+    setTimeout(function(){ button.textContent = original; button.disabled = false; }, 1200);
+  } catch(e) {
+    showArchiveMsg('err', '复制 data 路径失败: ' + e);
   }
 }
 

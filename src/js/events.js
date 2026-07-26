@@ -45,7 +45,8 @@ document.addEventListener('keyup', function(e){
 
 function handlePlayerKeydown(e) {
   if (!document.getElementById('page-player').classList.contains('active')) return false;
-  if (isTypingTarget(e.target)) return false;
+  var playerSeekFocused = e.target && e.target.id === 'playerSeek';
+  if (isTypingTarget(e.target) && !playerSeekFocused) return false;
   if (e.key === ' ') {
     if (!e.repeat) togglePlayerPlay();
     e.preventDefault();
@@ -101,7 +102,11 @@ window.addEventListener('mouseup', scheduleMpvBoundsSync);
 // ─── Start ──────────────────────────────
 
 if (invoke) {
-  init();
+  (async function startApplication(){
+    var libraryStatus = await initializeMediaLibrary();
+    await init();
+    if (libraryStatus && libraryStatus.needs_binding) openSettingsPage();
+  })();
 } else {
   document.getElementById('coverGrid').innerHTML = '<div class="empty-state"><h2>Tauri 未连接</h2><p>请在 Tauri 窗口中打开此页面</p></div>';
 }

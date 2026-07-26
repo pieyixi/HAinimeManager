@@ -143,7 +143,7 @@ fn write_store_zip(path: &std::path::Path, items: Vec<ZipItem>) -> Result<(), St
 
         push_u32(&mut out, 0x0403_4b50);
         push_u16(&mut out, 20);
-        push_u16(&mut out, 0);
+        push_u16(&mut out, 0x0800);
         push_u16(&mut out, 0);
         push_u16(&mut out, 0);
         push_u16(&mut out, 0);
@@ -158,7 +158,7 @@ fn write_store_zip(path: &std::path::Path, items: Vec<ZipItem>) -> Result<(), St
         push_u32(&mut central, 0x0201_4b50);
         push_u16(&mut central, 20);
         push_u16(&mut central, 20);
-        push_u16(&mut central, 0);
+        push_u16(&mut central, 0x0800);
         push_u16(&mut central, 0);
         push_u16(&mut central, 0);
         push_u16(&mut central, 0);
@@ -203,6 +203,48 @@ fn write_store_zip(path: &std::path::Path, items: Vec<ZipItem>) -> Result<(), St
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(path, out).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod zip_filename_tests {
+    use super::{write_store_zip, ZipItem};
+
+    #[test]
+    fn marks_local_and_central_names_as_utf8() {
+        let path = std::env::temp_dir().join(format!(
+            "hanime-manager-utf8-zip-{}-{}.zip",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let name = "姉SUMMER！/data/meta.json";
+        write_store_zip(
+            &path,
+            vec![ZipItem {
+                name: name.to_string(),
+                data: b"{}".to_vec(),
+            }],
+        )
+        .unwrap();
+
+        let data = std::fs::read(&path).unwrap();
+        let local_flags = u16::from_le_bytes([data[6], data[7]]);
+        let central_offset = data
+            .windows(4)
+            .position(|bytes| bytes == b"\x50\x4b\x01\x02")
+            .unwrap();
+        let central_flags =
+            u16::from_le_bytes([data[central_offset + 8], data[central_offset + 9]]);
+
+        assert_ne!(local_flags & 0x0800, 0);
+        assert_ne!(central_flags & 0x0800, 0);
+        assert!(data
+            .windows(name.as_bytes().len())
+            .any(|bytes| bytes == name.as_bytes()));
+        std::fs::remove_file(path).unwrap();
+    }
 }
 
 fn collect_non_video_files(

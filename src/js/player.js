@@ -11,7 +11,7 @@ function updatePlayerControls() {
   var duration = Number(state.player.duration) || 0;
   var current = Number(state.player.currentTime) || 0;
   seek.max = duration || 0;
-  seek.value = current || 0;
+  if (!state.player.isSeeking) seek.value = current || 0;
   time.textContent = formatTime(current) + ' / ' + formatTime(duration);
   updateCaptureButtons();
 }
@@ -146,7 +146,7 @@ async function pollMpvStatus() {
   var current = await safeMpvGetProperty('time-pos', 'double');
   var duration = await safeMpvGetProperty('duration', 'double');
   var muted = await safeMpvGetProperty('mute', 'flag');
-  if (Number.isFinite(Number(current))) state.player.currentTime = Number(current);
+  if (!state.player.isSeeking && Number.isFinite(Number(current))) state.player.currentTime = Number(current);
   if (Number.isFinite(Number(duration)) && Number(duration) > 0) state.player.duration = Number(duration);
   if (muted !== null) state.player.muted = !!muted;
   updatePlayerControls();
@@ -179,6 +179,9 @@ async function openPlayerWithEpisode(ep, title, mode) {
   if (!ep) return;
   state.player.episode = ep;
   state.player.mode = mode || 'detail';
+  state.player.isSeeking = false;
+  state.player.pendingSeek = null;
+  state.player.seekCommandRunning = false;
   document.getElementById('playerTitle').textContent = title;
   document.getElementById('mpvHint').textContent = '正在启动 mpv 播放窗口...';
   playerMessage('info', '正在启动 mpv 播放内核...');
@@ -231,6 +234,8 @@ async function returnFromPlayer() {
   state.player.currentTime = 0;
   state.player.duration = 0;
   state.player.muted = false;
+  state.player.isSeeking = false;
+  state.player.pendingSeek = null;
   state.player.mode = 'detail';
   updatePlayerControls();
   updateMuteControls();
@@ -295,7 +300,70 @@ function previewPlayerSeek(value) {
 async function seekPlayerTo(value) {
   state.player.currentTime = Math.max(0, Number(value) || 0);
   updatePlayerControls();
-  try { await mpvCommand('seek', [state.player.currentTime, 'absolute']); await pollMpvStatus(); } catch(e) { playerMessage('err', String(e)); }
+  queuePlayerAbsoluteSeek(state.player.currentTime, true);
+}
+
+function playerSeekValueFromPointer(event) {
+  var seek = document.getElementById('playerSeek');
+  if (!seek) return 0;
+  var rect = seek.getBoundingClientRect();
+  var ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0;
+  ratio = Math.max(0, Math.min(1, ratio));
+  return ratio * (Number(state.player.duration) || Number(seek.max) || 0);
+}
+
+function beginPlayerPointerSeek(event) {
+  if (!state.player.libmpvReady) return;
+  event.preventDefault();
+  state.player.isSeeking = true;
+  if (event.currentTarget.setPointerCapture) event.currentTarget.setPointerCapture(event.pointerId);
+  previewPlayerSeek(playerSeekValueFromPointer(event));
+  queuePlayerAbsoluteSeek(state.player.currentTime, false);
+}
+
+function movePlayerPointerSeek(event) {
+  if (!state.player.isSeeking) return;
+  event.preventDefault();
+  previewPlayerSeek(playerSeekValueFromPointer(event));
+  queuePlayerAbsoluteSeek(state.player.currentTime, false);
+}
+
+function endPlayerPointerSeek(event) {
+  if (!state.player.isSeeking) return;
+  event.preventDefault();
+  if (event.type !== 'pointercancel') previewPlayerSeek(playerSeekValueFromPointer(event));
+  state.player.isSeeking = false;
+  if (event.currentTarget.releasePointerCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+  event.currentTarget.blur();
+  queuePlayerAbsoluteSeek(state.player.currentTime, true);
+}
+
+function queuePlayerAbsoluteSeek(value, exact) {
+  var duration = Number(state.player.duration) || 0;
+  var target = Math.max(0, Number(value) || 0);
+  if (duration > 0) target = Math.min(duration, target);
+  state.player.pendingSeek = { value: target, exact: !!exact };
+  drainPlayerSeekQueue();
+}
+
+async function drainPlayerSeekQueue() {
+  if (state.player.seekCommandRunning || !state.player.libmpvReady) return;
+  state.player.seekCommandRunning = true;
+  try {
+    while (state.player.pendingSeek) {
+      var next = state.player.pendingSeek;
+      state.player.pendingSeek = null;
+      await mpvCommand('seek', [next.value, next.exact ? 'absolute+exact' : 'absolute+keyframes']);
+    }
+    if (!state.player.isSeeking) await pollMpvStatus();
+  } catch(e) {
+    playerMessage('err', String(e));
+  } finally {
+    state.player.seekCommandRunning = false;
+    if (state.player.pendingSeek) drainPlayerSeekQueue();
+  }
 }
 
 async function setPlayerVolume(value) {

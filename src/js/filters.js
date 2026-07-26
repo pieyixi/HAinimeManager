@@ -183,7 +183,15 @@ function applyFilter() {
     results = results.filter(function(w){
       if (key === 'year') {
         var monthValue = w.year + '-' + String(w.month).padStart(2, '0');
-        return vals.some(function(v){ return String(w.year) === v || monthValue === v; });
+        var releaseDates = Array.isArray(w.release_dates) && w.release_dates.length
+          ? w.release_dates
+          : [monthValue];
+        return vals.some(function(v){
+          return releaseDates.some(function(date){
+            date = String(date);
+            return v.length === 4 ? date.slice(0, 4) === v : date === v;
+          });
+        });
       }
       if (key === 'studio') return vals.indexOf(w.studio) >= 0;
       var cat = CAT_MAP[key];

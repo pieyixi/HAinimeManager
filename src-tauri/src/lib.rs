@@ -3,6 +3,7 @@ include!("import.rs");
 include!("archive.rs");
 include!("duplicates.rs");
 include!("database.rs");
+include!("portable_library.rs");
 include!("library.rs");
 include!("media.rs");
 include!("sync_backup.rs");

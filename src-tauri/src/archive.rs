@@ -214,10 +214,7 @@ fn find_import_cover(
     None
 }
 
-fn make_archive_draft(
-    dir_path: &str,
-    title_override: Option<String>,
-) -> Result<ArchiveDraft, String> {
+fn make_archive_draft(dir_path: &str) -> Result<ArchiveDraft, String> {
     let path = std::path::Path::new(dir_path);
     if !path.is_dir() {
         return Err("不是目录".to_string());
@@ -247,9 +244,7 @@ fn make_archive_draft(
         })
         .collect::<Vec<_>>();
 
-    let mut title = title_override
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| dir_name.clone());
+    let mut title = dir_name.clone();
     let mut studio = String::new();
     let mut synopsis = String::new();
     let mut characters = std::collections::HashMap::new();
@@ -321,8 +316,78 @@ fn make_archive_draft(
 }
 
 #[tauri::command]
-fn inspect_archive_folder(dir_path: String, title: Option<String>) -> Result<ArchiveDraft, String> {
-    make_archive_draft(&dir_path, title)
+fn inspect_archive_folder(dir_path: String) -> Result<ArchiveDraft, String> {
+    make_archive_draft(&dir_path)
+}
+
+fn ensure_archive_data_dir_path(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    if !path.is_dir() {
+        return Err("作品目录不存在或不是文件夹".to_string());
+    }
+    let data_dir = path.join("data");
+    if data_dir.exists() {
+        if data_dir.is_dir() {
+            return Ok(data_dir);
+        }
+        return Err("data 已存在，但不是文件夹".to_string());
+    }
+    match std::fs::create_dir(&data_dir) {
+        Ok(()) => Ok(data_dir),
+        Err(_) if data_dir.is_dir() => Ok(data_dir),
+        Err(err) => Err(format!("创建 data 文件夹失败: {}", err)),
+    }
+}
+
+#[tauri::command]
+fn ensure_archive_data_dir(dir_path: String) -> Result<String, String> {
+    ensure_archive_data_dir_path(std::path::Path::new(&dir_path))
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod archive_data_dir_tests {
+    use super::ensure_archive_data_dir_path;
+
+    #[test]
+    fn creates_data_once_without_touching_existing_files() {
+        let root = std::env::temp_dir().join(format!(
+            "hanime-manager-data-dir-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+
+        let data_dir = ensure_archive_data_dir_path(&root).unwrap();
+        let marker = data_dir.join("keep.txt");
+        std::fs::write(&marker, "keep").unwrap();
+        let second = ensure_archive_data_dir_path(&root).unwrap();
+
+        assert_eq!(data_dir, second);
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "keep");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_data_file_without_replacing_it() {
+        let root = std::env::temp_dir().join(format!(
+            "hanime-manager-data-file-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let data_file = root.join("data");
+        std::fs::write(&data_file, "keep").unwrap();
+
+        assert!(ensure_archive_data_dir_path(&root).is_err());
+        assert_eq!(std::fs::read_to_string(data_file).unwrap(), "keep");
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[tauri::command]

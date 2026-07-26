@@ -17,9 +17,12 @@ var state = {
   pageSize: 20,
   openDropdown: null,
   currentDetail: null,
+  unarchivedScrollTop: 0,
+  unarchivedActiveIndex: '',
   scanFolders: [],
   contextWorkId: null,
   confirmResolver: null,
+  mediaLibrary: null,
   player: {
     episode: null,
     timer: null,
@@ -31,11 +34,15 @@ var state = {
     keySeekTimer: null,
     keySeekInterval: null,
     keySeekDirection: 0,
+    isSeeking: false,
+    pendingSeek: null,
+    seekCommandRunning: false,
   },
   archive: {
     draft: null,
     coverData: null,
     episodeCoverData: {},
+    dataPath: '',
   },
 };
 

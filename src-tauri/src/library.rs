@@ -213,6 +213,7 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
                 folder_path,
                 episode_count,
             )| {
+                let release_dates = read_work_release_months(&folder_path, year, month);
                 WorkWithTags {
                     id,
                     title,
@@ -223,6 +224,7 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
                     cover_path,
                     folder_path,
                     episode_count,
+                    release_dates,
                     tags: tags_map.remove(&id).unwrap_or_default(),
                 }
             },
@@ -299,6 +301,35 @@ fn import_work_via_json(dir_path: String, db: State<Database>) -> Result<i64, St
     }
     let d = db.conn.lock().map_err(|e| e.to_string())?;
     import_work_dir(&d, &dir_path)
+}
+
+fn read_work_release_months(folder_path: &str, fallback_year: i32, fallback_month: i32) -> Vec<String> {
+    let meta_path = std::path::Path::new(folder_path).join("data").join("meta.json");
+    let mut months = std::fs::read_to_string(meta_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        .and_then(|json| json.get("episode_list").and_then(|list| list.as_array()).cloned())
+        .map(|list| {
+            list.into_iter()
+                .filter_map(|item| {
+                    let date = item.get("release_date")?.as_str()?.trim();
+                    let mut parts = date.split('-');
+                    let year = parts.next()?.parse::<i32>().ok()?;
+                    let month = parts.next()?.parse::<u32>().ok()?;
+                    (1..=12)
+                        .contains(&month)
+                        .then(|| format!("{year:04}-{month:02}"))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let mut seen = std::collections::HashSet::new();
+    months.retain(|month| seen.insert(month.clone()));
+    if months.is_empty() {
+        months.push(format!("{fallback_year:04}-{fallback_month:02}"));
+    }
+    months
 }
 
 #[tauri::command]
