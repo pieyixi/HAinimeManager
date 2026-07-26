@@ -9,3 +9,4 @@ tmp/
 *.sqlite
 *.sqlite3
 *.zip
+clean/
