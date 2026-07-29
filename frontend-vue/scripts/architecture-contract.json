@@ -1,0 +1,13 @@
+{
+  "baselineCommit": "f255de6b1f2c10271c980fab96b395bc72c0d7a6",
+  "currentMaximum": {
+    "globalBridgeReferences": 90,
+    "domQueries": 101,
+    "htmlWrites": 12
+  },
+  "finalTarget": {
+    "globalBridgeReferences": 0,
+    "domQueries": 0,
+    "htmlWrites": 0
+  }
+}

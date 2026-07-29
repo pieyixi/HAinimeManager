@@ -25,7 +25,7 @@ The application is designed for offline use. It keeps its index beside the execu
 
 ## Version 2.0
 
-Version 2.0 completes the frontend migration from a monolithic HTML and JavaScript implementation to Vue 3 and TypeScript. The visual contract and native backend integration remain compatible while application responsibilities are now separated into maintainable modules.
+Version 2.0 establishes Vue 3 and TypeScript as the active frontend runtime, replacing the previous monolithic HTML and JavaScript entry point. It preserves the visual contract and native backend integration while the remaining compatibility bridges are removed incrementally under an automated architecture contract.
 
 - Vue single-file components define the page structure.
 - Pinia stores own shared state and long-running workflows.

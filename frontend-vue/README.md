@@ -2,7 +2,7 @@
 
 This directory is the active Tauri frontend. It uses Vue 3, TypeScript, and Vite.
 
-Version 2.0 marks the completion of the migration. The previous HTML and JavaScript frontend is no longer part of the active build.
+Version 2.0 makes Vue the active frontend runtime. The previous HTML and JavaScript frontend is no longer part of the active build; remaining global and imperative compatibility bridges are tracked until the final reactive architecture is complete.
 
 ## Compatibility contract
 
@@ -31,9 +31,10 @@ Tauri runs these commands automatically through `src-tauri/tauri.conf.json`.
 - `src/features/player`: typed libmpv transport, native layout, thumbnail pipeline, and playback controller.
 - `src/runtime`: startup wiring and application-level events.
 - `scripts/ui-contract.json`: stable DOM ids used by CSS and native integration.
+- `ARCHITECTURE.md`: final ownership rules, dependency direction, migration gates, and completion criteria.
 
 ## Validation
 
-`npm run build` is the required frontend gate. It runs Vitest, validates the UI contract, performs strict TypeScript checking, and builds the production bundle. Native playback should additionally be checked in a Tauri window because the libmpv surface cannot be validated in a normal browser.
+`npm run build` is the required frontend gate. It runs Vitest, enforces the current architecture ceiling, validates the UI contract, performs strict TypeScript checking, and builds the production bundle. Run `npm run audit:architecture` to inspect progress toward zero global bridges, DOM queries, and generated HTML writes. Native playback should additionally be checked in a Tauri window because the libmpv surface cannot be validated in a normal browser.
 
 Keep visual changes separate from behavior changes so native playback regressions remain easy to isolate.

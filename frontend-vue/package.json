@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420",
     "test": "vitest run",
+    "audit:architecture": "node scripts/audit-architecture.mjs",
+    "check:architecture": "node scripts/audit-architecture.mjs --enforce",
     "check:parity": "node scripts/check-template-parity.mjs",
-    "build": "npm run test && npm run check:parity && vue-tsc --noEmit && vite build",
+    "build": "npm run test && npm run check:architecture && npm run check:parity && vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 1420"
   },
   "dependencies": {
