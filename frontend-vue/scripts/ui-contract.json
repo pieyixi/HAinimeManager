@@ -1,0 +1,21 @@
+{
+  "ids": [
+    "archiveCharacters", "archiveCoverDrop", "archiveDir", "archiveEpisodes", "archiveJsonPaste",
+    "archiveMsg", "archiveProgressRing", "archiveRatioBar", "archiveStudio", "archiveSynopsis", "archiveTitle",
+    "btnOpenFolder", "captureEpisodeBtn", "confirmBody", "confirmModal", "confirmTitle", "consoleProgress",
+    "consoleProgressBar", "consoleProgressText", "consoleResults", "consoleScanButton", "coverGrid",
+    "ctxDeleteWork", "ctxRefreshHome", "dbFilePath", "dbMsg", "detailCover", "detailDesc", "detailTags",
+    "detailTitle", "duplicateMsg", "episodeList", "filterRow", "fitModeBtn", "fullscreenBtn", "jsonPasteMsg",
+    "libraryMsg", "mediaPath", "metricArchived", "metricEpisodes", "metricProgress", "metricSize",
+    "metricTotalWorks", "metricUnarchived", "mpvHint", "mpvStage", "muteBtn", "page-archive", "page-detail",
+    "page-home", "page-player", "page-settings", "page-unarchived", "pagination", "playerDescriptionBlock",
+    "playerDescriptionToggle", "playerDuration", "playerMaskBottom", "playerMaskLeft", "playerMaskRight",
+    "playerMaskTop", "playerMsg", "playerNextBtn", "playerOtherCount", "playerOtherEpisodes", "playerPlayBtn",
+    "playerSeek", "playerSeekPreview", "playerSeekPreviewFrame", "playerSeekPreviewTime", "playerSidebar",
+    "playerSidebarToggle", "playerSpeedBtn", "playerTimeInput", "playerTitle", "playerVolume", "playerVolumeValue",
+    "playerWorkCharacters", "playerWorkDescription", "playerWorkStudio", "playerWorkTitle", "resultCount",
+    "searchClear", "searchInput", "sortNameBtn", "sortTimeBtn", "unarchivedCount", "unarchivedIndex",
+    "unarchivedList", "unarchivedPath", "workContextMenu"
+  ],
+  "pages": ["page-home", "page-detail", "page-player", "page-settings", "page-unarchived", "page-archive"]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "media-library-frontend",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420",
+    "test": "vitest run",
+    "check:parity": "node scripts/check-template-parity.mjs",
+    "build": "npm run test && npm run check:parity && vue-tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 1420"
+  },
+  "dependencies": {
+    "pinia": "^3.0.4",
+    "vue": "^3.5.18"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.1",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.6",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.0.4"
+  }
+}

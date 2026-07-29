@@ -6,6 +6,7 @@ include!("database.rs");
 include!("portable_library.rs");
 include!("library.rs");
 include!("media.rs");
+include!("thumbnail.rs");
 include!("sync_backup.rs");
 include!("library_console.rs");
 include!("runtime.rs");
