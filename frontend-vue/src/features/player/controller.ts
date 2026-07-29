@@ -1,5 +1,8 @@
 import { invokeTauri } from '../../api/tauri';
 import type { AppStore, ArchiveEpisode, PlayerEpisode } from '../../stores/app';
+import { useLibraryStore } from '../../stores/library';
+import { useNavigationStore } from '../../stores/navigation';
+import { registerPlayerCommands } from './commands';
 import { createPlayerLayout } from './layout';
 import { delay, initLibMpv, mpvCommand, mpvPlugin, mpvSetProperty, safeMpvGetProperty } from './mpv';
 import { createPlayerThumbnails } from './thumbnails';
@@ -7,7 +10,6 @@ import { createPlayerThumbnails } from './thumbnails';
 type PlayerMode = 'detail' | 'archive';
 type LoopMode = 'off' | 'one' | 'all';
 type FitMode = 'contain' | 'fill' | 'original';
-type GlobalFunction = (...args: unknown[]) => unknown;
 
 const fitModes: Record<FitMode, { label: string; panscan: number; unscaled: boolean }> = {
   contain: { label: '完整显示', panscan: 0, unscaled: false },
@@ -15,18 +17,7 @@ const fitModes: Record<FitMode, { label: string; panscan: number; unscaled: bool
   original: { label: '原始尺寸', panscan: 0, unscaled: true },
 };
 
-function globalFunction(name: string): GlobalFunction | undefined {
-  const value = (window as typeof window & Record<string, unknown>)[name];
-  return typeof value === 'function' ? value as GlobalFunction : undefined;
-}
-
-function message(kind = '', text = ''): void {
-  globalFunction('playerMessage')?.(kind, text);
-}
-
 function formatTime(seconds: number): string {
-  const formatter = globalFunction('formatTime');
-  if (formatter) return String(formatter(seconds));
   const total = Math.max(0, Number(seconds) || 0);
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
@@ -41,18 +32,25 @@ function errorText(error: unknown): string {
 }
 
 export function installPlayerController(state: AppStore): void {
+  function message(kind = '', text = ''): void {
+    state.player.messageKind = kind;
+    state.player.messageText = text;
+  }
+
   const layout = createPlayerLayout(state);
   const thumbnails = createPlayerThumbnails(state, formatTime);
+  const library = useLibraryStore();
+  const navigation = useNavigationStore();
   let pointerSeekWasPaused = false;
 
   function currentEpisode(): PlayerEpisode | null {
     if (state.player.mode === 'archive') return state.player.episode;
-    if (!state.currentDetail || !state.player.episode) return null;
-    return (state.currentDetail.episodes.find((episode) => episode.id === state.player.episode?.id) as PlayerEpisode | undefined) || state.player.episode;
+    if (!library.currentDetail || !state.player.episode) return null;
+    return (library.currentDetail.episodes.find((episode) => episode.id === state.player.episode?.id) as PlayerEpisode | undefined) || state.player.episode;
   }
 
   function episodeList(): PlayerEpisode[] {
-    if (state.player.mode === 'detail') return (state.currentDetail?.episodes || []) as PlayerEpisode[];
+    if (state.player.mode === 'detail') return (library.currentDetail?.episodes || []) as PlayerEpisode[];
     return (state.archive.draft?.episode_list || []) as PlayerEpisode[];
   }
 
@@ -168,12 +166,12 @@ export function installPlayerController(state: AppStore): void {
   }
 
   function coverUrl(path?: string): string {
-    return path ? String(globalFunction('coverUrl')?.(path) || '') : '';
+    return library.coverUrl(path);
   }
 
   function renderSidebar(): void {
     const episode = currentEpisode() || state.player.episode;
-    const detail = state.currentDetail;
+    const detail = library.currentDetail;
     const draft = state.archive.draft;
     const workTitle = state.player.mode === 'detail' ? detail?.work.title || '' : draft?.title || '未命名作品';
     const description = state.player.mode === 'detail' ? detail?.work.description || '' : draft?.synopsis || '';
@@ -310,7 +308,7 @@ export function installPlayerController(state: AppStore): void {
     message('info', '正在启动 mpv 播放内核...');
     updateCaptureButton();
     document.body.classList.add('player-video-loading');
-    globalFunction('showPage')?.('page-player');
+    navigation.showPage('page-player');
     void layout.syncBounds();
     stopTimer();
     try {
@@ -347,7 +345,7 @@ export function installPlayerController(state: AppStore): void {
   }
 
   async function openPlayer(episodeId: number): Promise<void> {
-    const detail = state.currentDetail;
+    const detail = library.currentDetail;
     if (!detail) return;
     const episode = detail.episodes.find((item) => item.id === episodeId) as PlayerEpisode | undefined;
     if (episode?.video_path) await openPlayerWithEpisode(episode, `${detail.work.title} / 第${episode.number || episode.id}集`, 'detail');
@@ -369,7 +367,7 @@ export function installPlayerController(state: AppStore): void {
     const mode = state.player.mode;
     if (state.player.fullscreen) await setFullscreen(false);
     document.body.classList.add('player-video-loading');
-    globalFunction('showPage')?.(mode === 'archive' ? 'page-archive' : 'page-detail');
+    navigation.showPage(mode === 'archive' ? 'page-archive' : 'page-detail');
     try { await mpvPlugin('destroy', { windowLabel: 'main' }); } catch { /* Already stopped. */ }
     Object.assign(state.player, {
       libmpvReady: false,
@@ -411,7 +409,7 @@ export function installPlayerController(state: AppStore): void {
     thumbnails.reset(episode.video_path);
     Object.assign(state.player, { currentTime: 0, duration: 0, paused: false, handlingEnd: true });
     const title = document.getElementById('playerTitle');
-    if (title && state.currentDetail?.work) title.textContent = `${state.currentDetail.work.title} / 第${episode.number || episode.id}集`;
+    if (title && library.currentDetail?.work) title.textContent = `${library.currentDetail.work.title} / 第${episode.number || episode.id}集`;
     renderSidebar();
     updateControls();
     document.body.classList.add('player-video-loading');
@@ -646,12 +644,14 @@ export function installPlayerController(state: AppStore): void {
       state.archive.episodeCoverData[episodeId] = captured.image_data;
       const archiveEpisode = state.archive.draft?.episode_list.find((item: ArchiveEpisode) => Number(item.id) === episodeId);
       if (archiveEpisode) archiveEpisode.cover_path = savedPath;
-      await globalFunction('reloadCoverCache')?.(savedPath);
+      await library.reloadCoverCache(savedPath);
       message('info', '已截为本集封面');
       await delay(350);
       await returnFromPlayer();
     } catch (error) { message('err', `取帧失败: ${errorText(error)}`); }
   }
+
+  registerPlayerCommands({ openPlayer, openPlayerWithEpisode });
 
   Object.assign(window, {
     updatePlayerControls: updateControls,

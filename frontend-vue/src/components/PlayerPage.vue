@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import { useNavigationStore } from '../stores/navigation';
+import { useAppStore } from '../stores/app';
+
+const navigation = useNavigationStore();
+const app = useAppStore();
+
 function call(name: string, ...args: unknown[]): void {
   const handler = (window as typeof window & Record<string, unknown>)[name];
   if (typeof handler === 'function') void (handler as (...values: unknown[]) => unknown)(...args);
@@ -10,7 +16,7 @@ function selectCurrentTarget(event: FocusEvent): void {
 </script>
 
 <template>
-  <div class="page" id="page-player">
+  <div class="page" :class="{ active: navigation.activePage === 'page-player' }" id="page-player">
     <div class="player-mask" id="playerMaskTop"></div>
     <div class="player-mask" id="playerMaskRight"></div>
     <div class="player-mask" id="playerMaskBottom"></div>
@@ -55,7 +61,7 @@ function selectCurrentTarget(event: FocusEvent): void {
                     <span id="playerDuration">00:00</span>
                   </div>
                 </div>
-                <span class="player-msg" id="playerMsg"></span>
+                <span class="player-msg" :class="app.player.messageKind" id="playerMsg">{{ app.player.messageText }}</span>
                 <div class="player-command-group right">
                   <div class="player-popover-wrap">
                     <button class="player-text-tool" id="playerSpeedBtn" aria-haspopup="true">倍速</button>

@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useArchiveStore } from '../stores/archive';
 import { useAppStore } from '../stores/app';
+import { useNavigationStore } from '../stores/navigation';
 import { type ConsoleItem, type LibraryScan, useSettingsStore } from '../stores/settings';
 
 const app = useAppStore();
 const settings = useSettingsStore();
+const archive = useArchiveStore();
+const navigation = useNavigationStore();
 
 type ScanGroupKey = keyof Pick<LibraryScan, 'changed_works' | 'new_episode_works' | 'new_complete_works' | 'attention_works'>;
 
@@ -19,16 +23,18 @@ const connected = computed(() => !(app.mediaLibrary as { needs_binding?: boolean
 const ringStyle = computed(() => ({ '--archive-angle': `${settings.archivePercent * 3.6}deg` }));
 const ratioStyle = computed(() => ({ width: `${settings.archivePercent}%` }));
 
-function showPage(id: string): void {
-  (window as typeof window & { showPage?: (page: string) => void }).showPage?.(id);
-}
-
 function openUnarchived(): void {
-  (window as typeof window & { openUnarchivedPage?: () => void }).openUnarchivedPage?.();
+  void archive.openUnarchivedPage();
 }
 
 function groupItems(key: ScanGroupKey): ConsoleItem[] {
   return settings.items(key);
+}
+
+function continueArchive(key: ScanGroupKey, index: number): void {
+  const item = settings.items(key)[index];
+  if (!item) return;
+  void archive.openArchiveAssistant(item.folder_path, item.new_episode_numbers?.[0] ?? null);
 }
 
 function duplicateSize(bytes: number): string {
@@ -37,9 +43,9 @@ function duplicateSize(bytes: number): string {
 </script>
 
 <template>
-  <div class="page" id="page-settings">
+  <div class="page" :class="{ active: navigation.activePage === 'page-settings' }" id="page-settings">
     <div class="settings">
-      <button type="button" class="page-back" @click="showPage('page-home')">返回</button>
+      <button type="button" class="page-back" @click="navigation.showPage('page-home')">返回</button>
       <div class="settings-title">设置</div>
       <div class="console-shell">
         <section class="settings-overview" aria-label="媒体库概览">
@@ -100,7 +106,7 @@ function duplicateSize(bytes: number): string {
                         <div v-if="item.new_episode_numbers?.length" class="console-episode-numbers">{{ item.new_episode_numbers.map(number => `#${number}`).join('、') }}</div>
                       </div>
                       <div class="console-row-actions">
-                        <button v-if="group.key === 'new_episode_works'" class="btn-primary compact" @click="settings.continueArchive(group.key, index)">继续建档</button>
+                        <button v-if="group.key === 'new_episode_works'" class="btn-primary compact" @click="continueArchive(group.key, index)">继续建档</button>
                         <button class="btn-secondary" @click="settings.openConsoleFolder(group.key, index)">打开文件夹</button>
                       </div>
                     </div>

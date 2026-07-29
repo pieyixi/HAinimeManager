@@ -2,15 +2,13 @@
 import { nextTick, ref, watch } from 'vue';
 import { summarizeUnarchivedReasons, unarchivedIndexLetters, useArchiveStore } from '../stores/archive';
 import { useAppStore } from '../stores/app';
+import { useNavigationStore } from '../stores/navigation';
 
 const app = useAppStore();
 const archive = useArchiveStore();
+const navigation = useNavigationStore();
 const listElement = ref<HTMLElement | null>(null);
 let scrollFrame: number | null = null;
-
-function showPage(id: string): void {
-  (window as typeof window & { showPage?: (page: string) => void }).showPage?.(id);
-}
 
 function scrollToIndex(letter: string): void {
   const list = listElement.value;
@@ -47,11 +45,11 @@ watch(() => archive.folders, async () => {
 </script>
 
 <template>
-  <div class="page" id="page-unarchived">
+  <div class="page" :class="{ active: navigation.activePage === 'page-unarchived' }" id="page-unarchived">
     <div class="workspace">
       <div class="workspace-top">
         <div>
-          <button type="button" class="page-back" @click="showPage('page-home')">返回</button>
+          <button type="button" class="page-back" @click="navigation.showPage('page-home')">返回</button>
           <div class="workspace-title">未建档</div>
           <div class="workspace-subtitle">有视频但 data、meta 或封面不完整的文件夹会留在这里，补齐后再进入主页面。</div>
         </div>

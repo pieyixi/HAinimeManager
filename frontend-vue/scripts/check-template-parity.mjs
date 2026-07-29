@@ -40,7 +40,7 @@ function compare(label, expected, actual) {
   throw new Error(`${label} differs from the legacy template\n  ${details}`);
 }
 
-const componentIds = unique(values(componentHtml, /\bid="([^"]+)"/g));
+const componentIds = unique(values(componentHtml, /(?:^|\s)id="([^"]+)"/gm));
 compare('DOM ids', contract.ids.slice().sort(), componentIds);
 
 const handlerPattern = /\bon(?:click|input|focus|blur|keydown|mouseenter|mouseleave|pointerdown|pointermove|pointerup|pointercancel|pointerleave)="([^"]+)"/g;

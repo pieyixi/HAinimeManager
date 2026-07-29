@@ -1,16 +1,24 @@
 <script setup lang="ts">
-import { nextTick, watch } from 'vue';
+import { nextTick, watch, type ComponentPublicInstance } from 'vue';
 import type { ArchiveEpisode } from '../stores/app';
 import { useAppStore } from '../stores/app';
 import { useArchiveStore } from '../stores/archive';
+import { useNavigationStore } from '../stores/navigation';
 
 const archive = useArchiveStore();
 const app = useAppStore();
+const navigation = useNavigationStore();
+const editorElements = new Map<number, HTMLElement>();
+
+function registerEditor(element: Element | ComponentPublicInstance | null, episodeId: number): void {
+  if (element instanceof HTMLElement) editorElements.set(episodeId, element);
+  else editorElements.delete(episodeId);
+}
 
 watch(() => app.archive.focusEpisode, async (episodeId) => {
-  if (!episodeId || app.activePage !== 'page-archive') return;
+  if (!episodeId || navigation.activePage !== 'page-archive') return;
   await nextTick();
-  const editor = document.querySelector<HTMLElement>(`.episode-editor[data-ep="${episodeId}"]`);
+  const editor = editorElements.get(episodeId);
   editor?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   editor?.classList.add('archive-focus');
   window.setTimeout(() => editor?.classList.remove('archive-focus'), 1600);
@@ -27,7 +35,7 @@ function setEpisodeTags(episode: ArchiveEpisode, category: keyof ArchiveEpisode[
 </script>
 
 <template>
-  <div class="page" id="page-archive">
+  <div class="page" :class="{ active: navigation.activePage === 'page-archive' }" id="page-archive">
     <div class="archive">
       <button type="button" class="page-back" @click="archive.openUnarchivedPage">返回</button>
       <div class="archive-title">建档助手</div>
@@ -83,7 +91,7 @@ function setEpisodeTags(episode: ArchiveEpisode, category: keyof ArchiveEpisode[
           <div class="archive-section-title">集数与封面</div>
           <div id="archiveEpisodes">
             <div v-if="!archive.episodes.length" class="archive-hint">未发现视频文件</div>
-            <div v-for="episode in archive.episodes" :key="episode.id" class="episode-editor" :data-ep="episode.id">
+            <div v-for="episode in archive.episodes" :key="episode.id" :ref="(element) => registerEditor(element, episode.id)" class="episode-editor" :data-ep="episode.id">
               <div>
                 <div class="drop-zone small" :data-episode-drop="episode.id" @dragover.prevent @drop.prevent="archive.setEpisodeCover(episode.id, dropFile($event))">
                   <img v-if="archive.episodePreview(episode)" :src="archive.episodePreview(episode)">

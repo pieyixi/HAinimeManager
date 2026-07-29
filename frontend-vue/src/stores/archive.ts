@@ -1,7 +1,10 @@
 import { defineStore } from 'pinia';
 import { nextTick } from 'vue';
 import { invokeTauri } from '../api/tauri';
+import { playerCommands } from '../features/player/commands';
 import { type ArchiveDraft, type ArchiveEpisode, useAppStore } from './app';
+import { useLibraryStore } from './library';
+import { useNavigationStore } from './navigation';
 import { useSettingsStore } from './settings';
 
 export interface UnarchivedItem {
@@ -21,11 +24,6 @@ const indexLetters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
 const collator = new Intl.Collator('zh-CN-u-co-pinyin', { numeric: true, sensitivity: 'base' });
 const pinyinBoundaries = '阿八嚓哒妸发旮哈讥咔垃妈拿哦啪期然撒塌挖昔压匝';
 const pinyinBoundaryLetters = 'ABCDEFGHJKLMNOPQRSTWXYZ';
-
-function globalFunction(name: string): ((...args: unknown[]) => unknown) | undefined {
-  const value = (window as typeof window & Record<string, unknown>)[name];
-  return typeof value === 'function' ? value as (...args: unknown[]) => unknown : undefined;
-}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -123,13 +121,14 @@ export const useArchiveStore = defineStore('archive', {
 
     async openUnarchivedPage(): Promise<void> {
       const app = useAppStore();
-      const returning = app.activePage === 'page-archive';
+      const navigation = useNavigationStore();
+      const returning = navigation.activePage === 'page-archive';
       if (!returning) {
         app.unarchivedScrollTop = 0;
         app.unarchivedActiveIndex = '';
       }
       this.unarchivedPath = useSettingsStore().mediaPath.trim() || 'D:\\HAnime';
-      globalFunction('showPage')?.('page-unarchived');
+      navigation.showPage('page-unarchived');
       await this.loadUnarchivedFolders();
     },
 
@@ -169,7 +168,7 @@ export const useArchiveStore = defineStore('archive', {
       this.message = null;
       this.jsonMessage = null;
       this.mainCoverPreview = '';
-      globalFunction('showPage')?.('page-archive');
+      useNavigationStore().showPage('page-archive');
       if (!dirPath) return;
       try {
         app.archive.dataPath = await invokeTauri<string>('ensure_archive_data_dir', { dirPath });
@@ -191,8 +190,9 @@ export const useArchiveStore = defineStore('archive', {
         this.synopsis = draft.synopsis || '';
         this.charactersText = Object.keys(draft.characters || {}).sort((left, right) => Number(left) - Number(right)).map((key) => draft.characters[key]).filter(Boolean).join('\n');
         const coverPaths = [draft.cover_path, ...draft.episode_list.map((episode) => episode.cover_path)].filter((path): path is string => Boolean(path));
-        await globalFunction('loadCovers')?.(coverPaths);
-        this.mainCoverPreview = draft.cover_path ? String(globalFunction('coverUrl')?.(draft.cover_path) || '') : '';
+        const library = useLibraryStore();
+        await library.loadCovers(coverPaths);
+        this.mainCoverPreview = library.coverUrl(draft.cover_path);
         this.showMessage('info', `已读取目录，发现 ${draft.episodes} 个视频`);
         await nextTick();
       } catch (error) {
@@ -202,7 +202,7 @@ export const useArchiveStore = defineStore('archive', {
 
     episodePreview(episode: ArchiveEpisode): string {
       const app = useAppStore();
-      return app.archive.episodeCoverData[episode.id] || (episode.cover_path ? String(globalFunction('coverUrl')?.(episode.cover_path) || '') : '');
+      return app.archive.episodeCoverData[episode.id] || useLibraryStore().coverUrl(episode.cover_path);
     },
 
     async setMainCover(file?: File): Promise<void> {
@@ -220,7 +220,7 @@ export const useArchiveStore = defineStore('archive', {
     async playEpisodeForCover(episodeId: number): Promise<void> {
       const episode = this.episodes.find((item) => Number(item.id) === Number(episodeId));
       if (!episode) { this.showMessage('err', '请先读取目录'); return; }
-      await globalFunction('openPlayerWithEpisode')?.({ id: episode.id, number: episode.id, video_path: episode.video_path }, `${this.draft?.title || '建档'} / 第${episode.id}集取帧`, 'archive');
+      await playerCommands.openPlayerWithEpisode({ id: episode.id, number: episode.id, video_path: episode.video_path }, `${this.draft?.title || '建档'} / 第${episode.id}集取帧`, 'archive');
     },
 
     collectArchiveInput(): Record<string, unknown> {
@@ -251,10 +251,11 @@ export const useArchiveStore = defineStore('archive', {
         const coverInputs = Object.entries(app.archive.episodeCoverData).map(([id, image_data]) => ({ id: Number.parseInt(id, 10), image_data }));
         if (coverInputs.length) await invokeTauri('save_archive_episode_covers', { input: { dir_path: this.dirPath.trim(), covers: coverInputs } });
         const outPath = await invokeTauri<string>('save_archive_draft', { input });
-        globalFunction('clearArchiveCoverCaches')?.(this.dirPath.trim(), this.episodes);
+        const library = useLibraryStore();
+        library.clearArchiveCoverCaches(this.dirPath.trim(), this.episodes);
         if (shouldImport) {
           await invokeTauri('import_work_via_json', { dirPath: this.dirPath.trim() });
-          await globalFunction('refreshHomeLibrary')?.({ resetFilters: true, clearCoverCache: true });
+          await library.refreshHome({ resetFilters: true, clearCoverCache: true });
         }
         this.showMessage('info', shouldImport ? `已保存并导入: ${outPath}` : `已保存: ${outPath}`);
       } catch (error) {
@@ -273,7 +274,7 @@ export const useArchiveStore = defineStore('archive', {
         await this.loadArchiveDraft();
         try {
           await invokeTauri('import_work_via_json', { dirPath });
-          await globalFunction('refreshHomeLibrary')?.({ resetFilters: true, clearCoverCache: true });
+          await useLibraryStore().refreshHome({ resetFilters: true, clearCoverCache: true });
           this.showJsonMessage('info', `已保存并导入主库: ${outPath}`);
         } catch (importError) {
           this.showJsonMessage('info', `已保存: ${outPath}；暂未导入主库: ${errorText(importError)}`);
@@ -293,9 +294,10 @@ export const useArchiveStore = defineStore('archive', {
       this.refreshing = true;
       try {
         if (app.archive.draft) {
-          if (app.archive.draft.cover_path) delete app.coverCache[app.archive.draft.cover_path];
-          app.archive.draft.episode_list.forEach((episode) => { if (episode.cover_path) delete app.coverCache[episode.cover_path]; });
-          globalFunction('clearArchiveCoverCaches')?.(this.dirPath.trim(), app.archive.draft.episode_list);
+          const library = useLibraryStore();
+          if (app.archive.draft.cover_path) delete library.coverCache[app.archive.draft.cover_path];
+          app.archive.draft.episode_list.forEach((episode) => { if (episode.cover_path) delete library.coverCache[episode.cover_path]; });
+          library.clearArchiveCoverCaches(this.dirPath.trim(), app.archive.draft.episode_list);
         }
         app.archive.coverData = null;
         app.archive.episodeCoverData = {};
@@ -332,22 +334,5 @@ export const useArchiveStore = defineStore('archive', {
     },
   },
 });
-
-export function installArchiveGlobals(): void {
-  const archive = useArchiveStore();
-  Object.assign(window, {
-    openUnarchivedPage: () => archive.openUnarchivedPage(),
-    loadUnarchivedFolders: () => archive.loadUnarchivedFolders(),
-    openArchiveAssistant: (path?: string, focus?: number | null) => archive.openArchiveAssistant(path, focus),
-    loadArchiveDraft: () => archive.loadArchiveDraft(),
-    renderArchiveEpisodes: () => undefined,
-    playArchiveEpisodeForCover: (id: number) => archive.playEpisodeForCover(id),
-    saveArchive: (shouldImport: boolean) => archive.saveArchive(shouldImport),
-    savePastedArchiveJson: () => archive.savePastedJson(),
-    openArchiveWorkFolder: () => archive.openWorkFolder(),
-    refreshArchiveDraft: () => archive.refreshDraft(),
-    copyArchiveDataPath: () => archive.copyDataPath(),
-  });
-}
 
 export { indexLetters as unarchivedIndexLetters };

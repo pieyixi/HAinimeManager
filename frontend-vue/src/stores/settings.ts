@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia';
 import { invokeTauri } from '../api/tauri';
 import { useAppStore } from './app';
+import { useLibraryStore } from './library';
+import { useNavigationStore } from './navigation';
 
 export interface MediaLibraryStatus {
   root_path: string | null;
@@ -49,11 +51,6 @@ type MessageKind = 'info' | 'err' | 'success';
 interface UiMessage {
   kind: MessageKind;
   text: string;
-}
-
-function globalFunction(name: string): ((...args: unknown[]) => unknown) | undefined {
-  const value = (window as typeof window & Record<string, unknown>)[name];
-  return typeof value === 'function' ? value as (...args: unknown[]) => unknown : undefined;
 }
 
 function errorText(error: unknown): string {
@@ -136,7 +133,7 @@ export const useSettingsStore = defineStore('settings', {
     },
 
     async openSettingsPage(): Promise<void> {
-      globalFunction('showPage')?.('page-settings');
+      useNavigationStore().showPage('page-settings');
       await this.loadSummary();
     },
 
@@ -162,7 +159,7 @@ export const useSettingsStore = defineStore('settings', {
       this.libraryMessage = { kind: 'info', text: '正在验证媒体库...' };
       try {
         await this.bindMediaLibraryPath(path, true);
-        await globalFunction('reloadLibraryData')?.({ resetFilters: false, clearCoverCache: true });
+        await useLibraryStore().reload({ resetFilters: false, clearCoverCache: true });
         this.scan = null;
         await this.loadSummary();
       } catch (error) {
@@ -193,13 +190,6 @@ export const useSettingsStore = defineStore('settings', {
     async openConsoleFolder(group: keyof LibraryScan, index: number): Promise<void> {
       const item = (this.scan?.[group] as ConsoleItem[] | undefined)?.[index];
       if (item) await invokeTauri('open_folder', { path: item.folder_path });
-    },
-
-    continueArchive(group: keyof LibraryScan, index: number): void {
-      const item = (this.scan?.[group] as ConsoleItem[] | undefined)?.[index];
-      if (!item) return;
-      const focus = item.new_episode_numbers?.[0] ?? null;
-      globalFunction('openArchiveAssistant')?.(item.folder_path, focus);
     },
 
     async scanLibraryChanges(): Promise<void> {
@@ -233,13 +223,13 @@ export const useSettingsStore = defineStore('settings', {
     async applyLibraryUpdates(): Promise<void> {
       const items = this.items('changed_works').filter((item) => item.can_update);
       if (!items.length) return;
-      const confirmed = await globalFunction('askConfirm')?.('全部更新', `将按当前文件重新导入 ${items.length} 个已建档作品，数据库中的对应信息会完整更新。`, '确认更新');
+      const confirmed = await useNavigationStore().askConfirm('全部更新', `将按当前文件重新导入 ${items.length} 个已建档作品，数据库中的对应信息会完整更新。`, '确认更新');
       if (!confirmed) return;
       try {
         this.setProgress(true, 35, '正在更新已建档作品');
         await invokeTauri('apply_library_updates', { folders: items.map((item) => item.folder_path) });
         this.setProgress(true, 100, '更新完成');
-        await globalFunction('reloadLibraryData')?.({ resetFilters: false, clearCoverCache: true });
+        await useLibraryStore().reload({ resetFilters: false, clearCoverCache: true });
         await this.scanLibraryChanges();
       } catch (error) {
         this.setProgress(false, 0, '');
@@ -250,13 +240,13 @@ export const useSettingsStore = defineStore('settings', {
     async importConsoleWorks(): Promise<void> {
       const items = this.items('new_complete_works');
       if (!items.length) return;
-      const confirmed = await globalFunction('askConfirm')?.('导入新作品', `将把 ${items.length} 个建档完整的新作品导入主库。`, '确认导入');
+      const confirmed = await useNavigationStore().askConfirm('导入新作品', `将把 ${items.length} 个建档完整的新作品导入主库。`, '确认导入');
       if (!confirmed) return;
       try {
         this.setProgress(true, 35, '正在导入新作品');
         await invokeTauri('batch_import_folders', { folders: items.map((item) => item.folder_path) });
         this.setProgress(true, 100, '导入完成');
-        await globalFunction('reloadLibraryData')?.({ resetFilters: false, clearCoverCache: true });
+        await useLibraryStore().reload({ resetFilters: false, clearCoverCache: true });
         await this.scanLibraryChanges();
       } catch (error) {
         this.setProgress(false, 0, '');
@@ -310,20 +300,3 @@ export const useSettingsStore = defineStore('settings', {
     },
   },
 });
-
-export function installSettingsGlobals(): void {
-  const settings = useSettingsStore();
-  Object.assign(window, {
-    initializeMediaLibrary: () => settings.initializeMediaLibrary(),
-    openSettingsPage: () => settings.openSettingsPage(),
-    doBindMediaLibrary: () => settings.bindMediaLibrary(),
-    loadLibraryConsoleSummary: () => settings.loadSummary(),
-    doScanLibraryChanges: () => settings.scanLibraryChanges(),
-    doApplyLibraryUpdates: () => settings.applyLibraryUpdates(),
-    doImportConsoleWorks: () => settings.importConsoleWorks(),
-    doDuplicateCheck: () => settings.duplicateCheck(),
-    doBackup: () => settings.backupDatabase(),
-    doDataBackup: () => settings.backupDataPackage(),
-    doRestore: () => settings.restoreDatabase(),
-  });
-}
