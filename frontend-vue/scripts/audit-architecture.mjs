@@ -23,8 +23,8 @@ const metricPatterns = {
     /window\s+as\s+typeof\s+window\s*&/g,
   ],
   domQueries: [
-    /\bgetElementById\s*\(/g,
-    /\bquerySelector(?:All)?\s*\(/g,
+    /\bgetElementById(?:<[^>]+>)?\s*\(/g,
+    /\bquerySelector(?:All)?(?:<[^>]+>)?\s*\(/g,
   ],
   htmlWrites: [
     /\.innerHTML\s*=/g,

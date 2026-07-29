@@ -37,14 +37,6 @@ export interface WorkDetail {
   characters?: string[];
 }
 
-export interface PlayerThumbnailRequest {
-  videoPath: string;
-  time: number;
-  key: string;
-  requestId: number;
-  exact: boolean;
-}
-
 export type PlayerEpisode = EpisodeSummary & { video_path: string };
 
 export interface ArchiveEpisode {
@@ -75,48 +67,6 @@ export const useAppStore = defineStore('app', {
     unarchivedScrollTop: 0,
     unarchivedActiveIndex: '',
     mediaLibrary: null as unknown,
-    player: {
-      episode: null as PlayerEpisode | null,
-      timer: null as number | null,
-      currentTime: 0,
-      duration: 0,
-      paused: false,
-      speed: 1,
-      fitMode: 'contain',
-      fullscreen: false,
-      sidebarCollapsed: false,
-      loopMode: 'off',
-      handlingEnd: false,
-      libmpvReady: false,
-      muted: false,
-      messageKind: '',
-      messageText: '',
-      mode: 'detail',
-      keySeekTimer: null as number | null,
-      keySeekInterval: null as number | null,
-      keySeekDirection: 0,
-      isSeeking: false,
-      pendingSeek: null as { value: number; exact: boolean } | null,
-      seekCommandRunning: false,
-      thumbnailVideoPath: '',
-      thumbnailTimer: null as number | null,
-      thumbnailRefineTimer: null as number | null,
-      thumbnailRequestId: 0,
-      thumbnailHoverKey: null as string | null,
-      thumbnailHoverTime: 0,
-      thumbnailDisplayedTime: null as number | null,
-      thumbnailInFlight: false,
-      thumbnailPending: null as PlayerThumbnailRequest | null,
-      thumbnailCache: {} as Record<string, string>,
-      thumbnailExactKeys: {} as Record<string, boolean>,
-      thumbnailCacheOrder: [] as string[],
-      thumbnailCacheTimes: [] as number[],
-      thumbnailPrefetchGeneration: 0,
-      thumbnailLastPointerTime: null as number | null,
-      thumbnailLastPointerStamp: 0,
-      thumbnailPointerVelocity: 0,
-      thumbnailLatency: 0.08,
-    },
     archive: {
       draft: null as ArchiveDraft | null,
       coverData: null as string | null,

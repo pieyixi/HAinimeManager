@@ -1,7 +1,13 @@
-import type { AppStore } from '../../stores/app';
+import type { PlayerMaskRect, PlayerStore } from '../../stores/player';
+import { useNavigationStore } from '../../stores/navigation';
 import { mpvPlugin, mpvSetProperty } from './mpv';
 
 interface Bounds { left: number; top: number; right: number; bottom: number }
+
+export interface PlayerLayoutElements {
+  stage: HTMLElement | null;
+  controls: HTMLElement | null;
+}
 
 function viewportSize(): { width: number; height: number } {
   return {
@@ -9,6 +15,7 @@ function viewportSize(): { width: number; height: number } {
     height: Math.max(1, document.documentElement.clientHeight || 0, window.innerHeight || 0),
   };
 }
+
 function clampBounds(rect: DOMRect, width: number, height: number): Bounds {
   const left = Math.max(0, Math.min(width, Math.round(rect.left)));
   const top = Math.max(0, Math.min(height, Math.round(rect.top)));
@@ -17,40 +24,42 @@ function clampBounds(rect: DOMRect, width: number, height: number): Bounds {
   return { left, top, right, bottom };
 }
 
-function applyHitTestGuard(state: AppStore, bounds: Bounds): Bounds {
-  const guarded = { ...bounds };
-  if (state.player.fullscreen && !document.body.classList.contains('player-controls-visible')) return guarded;
-  const controls = document.querySelector<HTMLElement>('.player-controls');
-  if (controls) {
-    const controlsTop = Math.round(controls.getBoundingClientRect().top);
-    if (Number.isFinite(controlsTop) && controlsTop <= guarded.bottom) {
-      guarded.bottom = Math.max(guarded.top + 1, controlsTop - 1);
-    }
+function maskRect(left: number, top: number, width: number, height: number): PlayerMaskRect {
+  return { left, top, width: Math.max(0, width), height: Math.max(0, height) };
+}
+
+export function createPlayerLayout(player: PlayerStore) {
+  const navigation = useNavigationStore();
+  const elements: PlayerLayoutElements = { stage: null, controls: null };
+  const scheduled = new Set<number>();
+
+  function bind(next: PlayerLayoutElements): void {
+    elements.stage = next.stage;
+    elements.controls = next.controls;
   }
-  return guarded;
-}
 
-function updateMasks(bounds: Bounds, width: number, height: number): void {
-  const top = document.getElementById('playerMaskTop');
-  const right = document.getElementById('playerMaskRight');
-  const bottom = document.getElementById('playerMaskBottom');
-  const left = document.getElementById('playerMaskLeft');
-  if (!top || !right || !bottom || !left) return;
-  const overlap = 2;
-  top.style.cssText = `left:0;top:0;width:${width}px;height:${Math.max(0, bounds.top + overlap)}px`;
-  bottom.style.cssText = `left:0;top:${Math.max(0, bounds.bottom - overlap)}px;width:${width}px;height:${Math.max(0, height - bounds.bottom + overlap)}px`;
-  left.style.cssText = `left:0;top:${bounds.top}px;width:${Math.max(0, bounds.left + overlap)}px;height:${Math.max(0, bounds.bottom - bounds.top)}px`;
-  right.style.cssText = `left:${Math.max(0, bounds.right - overlap)}px;top:${bounds.top}px;width:${Math.max(0, width - bounds.right + overlap)}px;height:${Math.max(0, bounds.bottom - bounds.top)}px`;
-}
+  function applyHitTestGuard(bounds: Bounds): Bounds {
+    const guarded = { ...bounds };
+    if (player.fullscreen && !player.controlsVisible) return guarded;
+    const controlsTop = Math.round(elements.controls?.getBoundingClientRect().top ?? Number.NaN);
+    if (Number.isFinite(controlsTop) && controlsTop <= guarded.bottom) guarded.bottom = Math.max(guarded.top + 1, controlsTop - 1);
+    return guarded;
+  }
 
-export function createPlayerLayout(state: AppStore) {
+  function updateMasks(bounds: Bounds, width: number, height: number): void {
+    const overlap = 2;
+    player.maskTop = maskRect(0, 0, width, bounds.top + overlap);
+    player.maskBottom = maskRect(0, Math.max(0, bounds.bottom - overlap), width, height - bounds.bottom + overlap);
+    player.maskLeft = maskRect(0, bounds.top, bounds.left + overlap, bounds.bottom - bounds.top);
+    player.maskRight = maskRect(Math.max(0, bounds.right - overlap), bounds.top, width - bounds.right + overlap, bounds.bottom - bounds.top);
+  }
+
   async function syncBounds(): Promise<void> {
-    const stage = document.getElementById('mpvStage');
-    if (!stage) return;
+    if (!elements.stage) return;
     const viewport = viewportSize();
-    const bounds = applyHitTestGuard(state, clampBounds(stage.getBoundingClientRect(), viewport.width, viewport.height));
+    const bounds = applyHitTestGuard(clampBounds(elements.stage.getBoundingClientRect(), viewport.width, viewport.height));
     updateMasks(bounds, viewport.width, viewport.height);
-    if (!state.player.libmpvReady) return;
+    if (!player.libmpvReady) return;
     await mpvPlugin('set_video_margin_ratio', {
       windowLabel: 'main',
       ratio: {
@@ -63,28 +72,41 @@ export function createPlayerLayout(state: AppStore) {
   }
 
   function scheduleSync(): void {
-    if (!document.getElementById('page-player')?.classList.contains('active')) return;
+    if (navigation.activePage !== 'page-player') return;
     void syncBounds();
-    [80, 240, 600, 1000].forEach((delay) => window.setTimeout(() => { void syncBounds(); }, delay));
+    [80, 240, 600, 1000].forEach((delay) => {
+      const timer = window.setTimeout(() => {
+        scheduled.delete(timer);
+        void syncBounds();
+      }, delay);
+      scheduled.add(timer);
+    });
   }
 
   function showFullscreenControls(): void {
-    if (!state.player.fullscreen || document.body.classList.contains('player-controls-visible')) return;
-    document.body.classList.add('player-controls-visible');
-    if (state.player.libmpvReady) void mpvSetProperty('panscan', 1).catch(() => undefined);
+    if (!player.fullscreen || player.controlsVisible) return;
+    player.controlsVisible = true;
+    if (player.libmpvReady) void mpvSetProperty('panscan', 1).catch(() => undefined);
     scheduleSync();
   }
 
   function hideFullscreenControls(applyFitMode: () => Promise<void>): void {
-    if (!state.player.fullscreen) return;
-    window.setTimeout(() => {
-      const controls = document.querySelector('.player-controls');
-      if (controls?.matches(':hover')) return;
-      document.body.classList.remove('player-controls-visible');
+    if (!player.fullscreen) return;
+    const timer = window.setTimeout(() => {
+      scheduled.delete(timer);
+      if (elements.controls?.matches(':hover')) return;
+      player.controlsVisible = false;
       void applyFitMode();
       scheduleSync();
     }, 120);
+    scheduled.add(timer);
   }
 
-  return { syncBounds, scheduleSync, showFullscreenControls, hideFullscreenControls };
+  function dispose(): void {
+    scheduled.forEach((timer) => window.clearTimeout(timer));
+    scheduled.clear();
+    bind({ stage: null, controls: null });
+  }
+
+  return { bind, syncBounds, scheduleSync, showFullscreenControls, hideFullscreenControls, dispose };
 }

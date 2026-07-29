@@ -8,11 +8,17 @@ const app = useAppStore();
 const archive = useArchiveStore();
 const navigation = useNavigationStore();
 const listElement = ref<HTMLElement | null>(null);
+const anchorElements = new Map<string, HTMLElement>();
 let scrollFrame: number | null = null;
+
+function setAnchorElement(letter: string, element: unknown): void {
+  if (element instanceof HTMLElement) anchorElements.set(letter, element);
+  else anchorElements.delete(letter);
+}
 
 function scrollToIndex(letter: string): void {
   const list = listElement.value;
-  const anchor = list?.querySelector<HTMLElement>(`[data-index-anchor="${letter}"]`);
+  const anchor = anchorElements.get(letter);
   if (!list || !anchor) return;
   archive.setActiveIndex(letter);
   list.scrollTo({ top: Math.max(0, anchor.offsetTop - 6), behavior: 'smooth' });
@@ -22,7 +28,7 @@ function updateIndexFromScroll(): void {
   const list = listElement.value;
   if (!list) return;
   app.unarchivedScrollTop = list.scrollTop;
-  const anchors = [...list.querySelectorAll<HTMLElement>('[data-index-anchor]')];
+  const anchors = archive.groupedFolders.map((group) => anchorElements.get(group.letter)).filter((anchor): anchor is HTMLElement => Boolean(anchor));
   if (!anchors.length) return;
   let current = anchors[0].dataset.indexAnchor || '';
   const threshold = list.scrollTop + 18;
@@ -70,7 +76,7 @@ watch(() => archive.folders, async () => {
             <div v-else-if="!archive.folders.length" class="settings-msg info">没有未建档作品</div>
             <div v-else class="unarchived-list">
               <template v-for="group in archive.groupedFolders" :key="group.letter">
-                <div class="unarchived-anchor" :data-index-anchor="group.letter">{{ group.letter }}</div>
+                <div :ref="(element) => setAnchorElement(group.letter, element)" class="unarchived-anchor" :data-index-anchor="group.letter">{{ group.letter }}</div>
                 <div v-for="item in group.items" :key="item.folder_path" class="unarchived-card">
                   <div>
                     <div class="unarchived-name">{{ item.title }}</div>

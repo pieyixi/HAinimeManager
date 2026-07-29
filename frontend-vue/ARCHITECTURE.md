@@ -1,47 +1,53 @@
-# Frontend Architecture Target
+# Frontend Architecture
 
-This document defines the completion criteria for the Vue migration. Visual behavior and the Rust command contract remain stable while implementation ownership moves from global DOM procedures to typed Vue modules.
+The Vue migration is complete. Visual behavior and the Rust command contract remain stable while application state, rendering, navigation, and playback controls are owned by typed Vue modules.
 
-## Non-negotiable Completion Criteria
+## Enforced Rules
 
-- Business behavior is not registered on `window`.
-- Components call typed stores and composables directly.
-- Application data is rendered by Vue templates, not HTML strings.
-- Template refs replace application-wide DOM lookup.
-- Native playback layout is the only layer allowed to measure rendered geometry.
+- Business behavior is never registered on `window`.
+- Application data is rendered by Vue templates, never HTML strings.
+- Stores own shared state; components own template refs and presentation-only measurements.
+- Application-wide DOM lookup is forbidden.
+- The native playback layout may measure only its registered stage and controls refs.
 - Page transitions and library refreshes are driven by reactive state.
-- Every migration stage passes unit tests, the UI contract, TypeScript, and a production build.
+- Every production build runs unit tests, architecture checks, the UI contract, TypeScript, and Vite.
 
-## Target Ownership
+## Current Structure
 
 ```text
 src/
-|-- App.vue
+|-- App.vue                         Application composition and runtime lifetime
+|-- main.ts                         Vue, Pinia, and root mount
 |-- api/
-|   `-- tauri.ts
+|   `-- tauri.ts                    Typed Tauri connectivity adapter
 |-- components/
-|   |-- common/
-|   |-- library/
-|   |-- detail/
-|   |-- archive/
-|   |-- settings/
-|   `-- player/
-|-- composables/
-|   |-- useApplicationKeyboard.ts
-|   |-- useNativeVideoLayout.ts
-|   |-- usePlaybackSession.ts
-|   `-- useTimelinePreview.ts
+|   |-- HomePage.vue                Library grid, filters, sorting, pagination
+|   |-- DetailPage.vue              Metadata and episode rendering
+|   |-- PlayerPage.vue              Reactive playback UI and registered refs
+|   |-- UnarchivedPage.vue          Incomplete-entry list and A-Z navigation
+|   |-- ArchivePage.vue             Metadata authoring workspace
+|   |-- SettingsPage.vue            Library console, synchronization, backups
+|   `-- GlobalOverlays.vue          Confirmation modal and context menu
 |-- stores/
-|   |-- navigation.ts
-|   |-- library.ts
-|   |-- archive.ts
-|   |-- settings.ts
-|   `-- player.ts
-`-- domain/
-    |-- library.ts
-    |-- archive.ts
-    `-- player.ts
+|   |-- app.ts                      Shared archive draft and backend data types
+|   |-- navigation.ts               Pages, confirmation state, context menu
+|   |-- library.ts                  Works, covers, filters, detail, pagination
+|   |-- archive.ts                  Incomplete folders and authoring workflow
+|   |-- settings.ts                 Binding, scans, imports, updates, backups
+|   `-- player.ts                   Playback and timeline-preview state
+|-- features/player/
+|   |-- commands.ts                 Typed command boundary used by pages
+|   |-- controller.ts               libmpv session and transport orchestration
+|   |-- layout.ts                   Native child-window geometry synchronization
+|   |-- thumbnails.ts               Adaptive preview extraction and memory cache
+|   |-- model.ts                    Pure display and playlist rules
+|   `-- mpv.ts                      libmpv plugin adapter
+`-- runtime/
+    |-- startApplication.ts         Runtime assembly and cleanup
+    `-- applicationEvents.ts        Global keyboard and window events
 ```
+
+Tests are colocated with their domain modules as `*.test.ts`.
 
 ## Dependency Direction
 
@@ -49,36 +55,44 @@ src/
 Vue page/component
         |
         v
-Pinia store or composable
+Pinia store or typed feature command
         |
         v
-Typed Tauri API adapter
+Tauri API / libmpv adapter
         |
         v
-Rust command
+Rust command or plugin
 ```
 
-Lower layers must not import page components. Stores must not locate DOM elements. Components must not invoke Rust commands by string outside the API adapter.
+Lower layers do not import page components. Stores do not locate DOM elements. Components do not build application markup dynamically.
 
 ## State Boundaries
 
-- `navigation`: active page, return destination, overlays, and context menu state.
+- `navigation`: active page, confirmation modal, and context menu.
 - `library`: works, filters, sorting, responsive page size, cover cache, and selected detail.
 - `archive`: incomplete folders, index navigation, draft metadata, and cover edits.
 - `settings`: library binding, scan progress, synchronization results, and backups.
-- `player`: playback session, controls, playlist, loop mode, fullscreen state, and native viewport state.
+- `player`: playback session, controls, playlist mode, fullscreen state, preview cache, and native viewport masks.
+- `app`: archive draft data shared with capture mode plus common backend types. It is not a second library or player state source.
 
 ## Native Player Boundary
 
-The libmpv child window is not a Vue DOM node. `useNativeVideoLayout` may read a dedicated template ref and viewport dimensions, then send bounds to Rust. It must not query unrelated controls or own playback state. Timeline extraction remains in `useTimelinePreview`; transport commands remain in the player store/API adapter.
+The libmpv child window is not a Vue DOM node. `layout.ts` receives the video stage and controls through explicit template refs, measures their rectangles, and sends normalized margins to the plugin. It does not query the page or own transport state.
 
-## Migration Gates
+`thumbnails.ts` keeps a bounded in-memory cache, progressive prefetch plan, pointer-velocity prediction, and exact-frame refinement. It updates reactive preview state and never writes to the DOM.
 
-1. Reactive navigation and overlays.
-2. Library grid, filters, pagination, and detail rendering.
-3. Archive, incomplete library, and settings workflows.
-4. Player components and composables.
-5. Removal of the compatibility runtime.
-6. Unit, production, Tauri, playback, fullscreen, and cross-monitor verification.
+`controller.ts` owns mpv initialization, polling, seeking, loop transitions, fullscreen calls, and capture orchestration. `PlayerPage.vue` owns all visible text, classes, controls, playlist markup, and accessibility state.
 
-Run `npm run audit:architecture` to inspect remaining compatibility metrics. `scripts/architecture-contract.json` records the current ceiling and the final zero target; each completed stage must lower the ceiling.
+## Verification Gates
+
+`npm run build` enforces all frontend gates:
+
+1. Vitest domain tests.
+2. Zero global compatibility bridges.
+3. Zero application DOM queries.
+4. Zero HTML string injection.
+5. Stable UI identifiers and no inline handlers.
+6. Strict Vue TypeScript validation.
+7. Vite production build.
+
+The native verification set additionally covers Rust tests, embedded playback, timeline preview, pointer seeking, pause/resume, next-episode playback, sidebar resizing, fullscreen controls, maximized-window restoration, cross-monitor movement, and return navigation.

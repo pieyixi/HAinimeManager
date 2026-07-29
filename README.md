@@ -25,13 +25,14 @@ The application is designed for offline use. It keeps its index beside the execu
 
 ## Version 2.0
 
-Version 2.0 establishes Vue 3 and TypeScript as the active frontend runtime, replacing the previous monolithic HTML and JavaScript entry point. It preserves the visual contract and native backend integration while the remaining compatibility bridges are removed incrementally under an automated architecture contract.
+Version 2.0 completes the Vue 3 and TypeScript frontend migration, replacing the previous monolithic HTML and JavaScript runtime while preserving the visual contract and native backend integration.
 
 - Vue single-file components define the page structure.
 - Pinia stores own shared state and long-running workflows.
 - Library and player behavior live in dedicated feature modules.
-- The libmpv transport, native video layout, timeline preview pipeline, and playback session are isolated from page components.
-- Automated tests cover indexing, incomplete-entry summaries, size formatting, and timeline preview planning.
+- The libmpv transport, native video layout, timeline preview pipeline, and playback session are isolated behind typed feature boundaries.
+- Automated tests cover library filtering, pagination, indexing, incomplete-entry summaries, size formatting, player display rules, playlist transitions, and timeline preview planning.
+- Architecture checks enforce zero global compatibility bridges, zero application DOM queries, and zero HTML string injection.
 - A UI contract check protects stable element identifiers and rejects inline HTML event handlers.
 
 ## Project Layout
