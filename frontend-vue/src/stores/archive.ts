@@ -73,6 +73,18 @@ export function summarizeUnarchivedReasons(item: UnarchivedItem): string[] {
   return summary;
 }
 
+export function restoredUnarchivedScrollTop(
+  savedTop: number,
+  maxTop: number,
+  focusedCardTop?: number,
+  focusedCardViewportOffset = 0,
+): number {
+  const target = Number.isFinite(focusedCardTop)
+    ? Number(focusedCardTop) - Math.max(0, focusedCardViewportOffset)
+    : savedTop;
+  return Math.max(0, Math.min(Math.max(0, maxTop), Math.max(0, target || 0)));
+}
+
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -95,6 +107,7 @@ export const useArchiveStore = defineStore('archive', {
     activeIndex: '',
     dirPath: '',
     title: '',
+    searchAliasesText: '',
     studio: '',
     charactersText: '',
     synopsis: '',
@@ -126,6 +139,8 @@ export const useArchiveStore = defineStore('archive', {
       if (!returning) {
         app.unarchivedScrollTop = 0;
         app.unarchivedActiveIndex = '';
+        app.unarchivedFocusPath = '';
+        app.unarchivedFocusOffset = 0;
       }
       this.unarchivedPath = useSettingsStore().mediaPath.trim() || 'D:\\HAnime';
       navigation.showPage('page-unarchived');
@@ -161,6 +176,7 @@ export const useArchiveStore = defineStore('archive', {
       app.archive = { draft: null, coverData: null, episodeCoverData: {}, dataPath: '', focusEpisode: focusEpisode || null };
       this.dirPath = dirPath;
       this.title = '';
+      this.searchAliasesText = '';
       this.studio = '';
       this.charactersText = '';
       this.synopsis = '';
@@ -186,6 +202,7 @@ export const useArchiveStore = defineStore('archive', {
         const draft = await invokeTauri<ArchiveDraft>('inspect_archive_folder', { dirPath });
         app.archive.draft = draft;
         this.title = draft.title || '';
+        this.searchAliasesText = (draft.search_aliases || []).join('\n');
         this.studio = draft.studio || '';
         this.synopsis = draft.synopsis || '';
         this.charactersText = Object.keys(draft.characters || {}).sort((left, right) => Number(left) - Number(right)).map((key) => draft.characters[key]).filter(Boolean).join('\n');
@@ -231,6 +248,7 @@ export const useArchiveStore = defineStore('archive', {
       return {
         dir_path: this.dirPath.trim(),
         title: this.title.trim(),
+        search_aliases: [...new Set(this.searchAliasesText.split(/\r?\n/).map((alias) => alias.trim()).filter(Boolean))],
         studio: this.studio.trim(),
         synopsis: this.synopsis.trim(),
         characters,

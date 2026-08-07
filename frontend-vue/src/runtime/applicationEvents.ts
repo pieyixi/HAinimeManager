@@ -67,6 +67,14 @@ export function installApplicationEvents(library: LibraryStore): () => void {
 
   listenDocument('keydown', (event) => { handlePlayerKeydown(event); });
   listenDocument('keyup', handlePlayerKeyup);
+  listenDocument('contextmenu', (event) => {
+    event.preventDefault();
+    const insideHomeGrid = navigation.activePage === 'page-home'
+      && event.composedPath().some((node) => node instanceof HTMLElement && node.id === 'coverGrid');
+    if (insideHomeGrid) return;
+    library.closeDropdown();
+    navigation.closeContextMenu();
+  });
 
   let resizeTimer: number | null = null;
   listen(window, 'resize', () => {

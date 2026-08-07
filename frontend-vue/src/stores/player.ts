@@ -10,17 +10,18 @@ export interface PlayerThumbnailRequest {
   time: number;
   key: string;
   requestId: number;
+  generation: number;
   exact: boolean;
 }
 
-export interface PlayerMaskRect {
+export interface PlayerVideoHole {
   left: number;
   top: number;
   width: number;
   height: number;
 }
 
-const emptyMask = (): PlayerMaskRect => ({ left: 0, top: 0, width: 0, height: 0 });
+const emptyVideoHole = (): PlayerVideoHole => ({ left: 0, top: 0, width: 1, height: 1 });
 
 export const usePlayerStore = defineStore('player', {
   state: () => ({
@@ -53,10 +54,7 @@ export const usePlayerStore = defineStore('player', {
     isSeeking: false,
     pendingSeek: null as { value: number; exact: boolean } | null,
     seekCommandRunning: false,
-    maskTop: emptyMask(),
-    maskRight: emptyMask(),
-    maskBottom: emptyMask(),
-    maskLeft: emptyMask(),
+    videoHole: emptyVideoHole(),
     thumbnailVideoPath: '',
     thumbnailRequestId: 0,
     thumbnailHoverKey: null as string | null,

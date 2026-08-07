@@ -1,29 +1,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useArchiveStore } from '../stores/archive';
-import { type FilterKey, useLibraryStore } from '../stores/library';
+import { calculateCoverGridLayout, useLibraryStore } from '../stores/library';
 import { useNavigationStore } from '../stores/navigation';
-import { useSettingsStore } from '../stores/settings';
 
 const library = useLibraryStore();
 const navigation = useNavigationStore();
-const archive = useArchiveStore();
-const settings = useSettingsStore();
 const gridElement = ref<HTMLElement | null>(null);
-const searchElement = ref<HTMLInputElement | null>(null);
 const pageJump = ref(1);
+const gridColumns = ref(1);
+const gridCardWidth = ref(158);
 let resizeObserver: ResizeObserver | null = null;
-
-const dropdownStyle = computed(() => ({
-  top: `${library.dropdownPosition.top}px`,
-  left: `${library.dropdownPosition.left}px`,
-  width: `${library.dropdownPosition.width}px`,
-  transform: 'translateX(-50%)',
+const gridStyle = computed(() => ({
+  '--grid-columns': String(gridColumns.value),
+  '--grid-card-width': `${gridCardWidth.value}px`,
 }));
-
-const genericOptions = computed(() => library.openDropdown && library.openDropdown !== 'year'
-  ? library.filterOptions(library.openDropdown)
-  : []);
 
 function measureGrid(preservePosition = true): void {
   const grid = gridElement.value;
@@ -31,17 +21,10 @@ function measureGrid(preservePosition = true): void {
   const style = window.getComputedStyle(grid);
   const paddingX = Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
   const paddingY = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
-  library.updatePageSize(grid.clientWidth, grid.clientHeight, paddingX, paddingY, preservePosition);
-}
-
-function openFilter(key: FilterKey, event: MouseEvent): void {
-  event.stopPropagation();
-  library.toggleDropdown(key, event.currentTarget as HTMLElement);
-}
-
-function clearSearch(): void {
-  library.clearSearchAndFilters();
-  void nextTick(() => searchElement.value?.focus());
+  const layout = calculateCoverGridLayout(grid.clientWidth, grid.clientHeight, paddingX, paddingY);
+  gridColumns.value = layout.columns;
+  gridCardWidth.value = layout.cardWidth;
+  library.updatePageSize(layout.columns * layout.rows, preservePosition);
 }
 
 function imageError(event: Event): void {
@@ -60,15 +43,18 @@ function showHomeMenu(event: MouseEvent): void {
   navigation.showContextMenu(event, 'home');
 }
 
-function jumpToPage(): void {
-  library.goPage(pageJump.value);
-}
-
-function handleDocumentClick(): void {
-  library.closeDropdown();
+async function jumpToPage(): Promise<void> {
+  await library.goPage(pageJump.value);
 }
 
 watch(() => library.currentPage, (page) => { pageJump.value = page; }, { immediate: true });
+watch(
+  () => [navigation.activePage, ...library.pagedWorks.map((work) => work.cover_path || '')],
+  ([page]) => {
+    if (page === 'page-home') void library.loadVisibleCovers();
+  },
+  { immediate: true, flush: 'post' },
+);
 watch(() => navigation.activePage, async (page) => {
   if (page !== 'page-home') return;
   await nextTick();
@@ -76,7 +62,6 @@ watch(() => navigation.activePage, async (page) => {
 });
 
 onMounted(() => {
-  document.addEventListener('click', handleDocumentClick);
   if (gridElement.value) {
     resizeObserver = new ResizeObserver(() => measureGrid(true));
     resizeObserver.observe(gridElement.value);
@@ -85,7 +70,6 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', handleDocumentClick);
   resizeObserver?.disconnect();
 });
 </script>
@@ -93,31 +77,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="page" :class="{ active: navigation.activePage === 'page-home' }" id="page-home">
     <div class="home">
-      <div class="search-row">
-        <div class="toolbar-spacer"></div>
-        <div class="search-box">
-          <span class="search-icon">&#128269;</span>
-          <input ref="searchElement" v-model="library.search" type="text" placeholder="搜索标题、简介、制作商、Tag" id="searchInput" autocomplete="off" autocapitalize="off" spellcheck="false" @input="library.currentPage = 1">
-          <span class="search-result-count" id="resultCount">{{ library.filteredWorks.length }} 个作品</span>
-          <button class="search-clear" :class="{ visible: library.showClearButton }" id="searchClear" @click="clearSearch">清除</button>
-        </div>
-        <div class="header-actions">
-          <button class="btn-icon" @click="archive.openUnarchivedPage" title="未建档">未建档</button>
-          <button class="btn-icon" @click="settings.openSettingsPage" title="设置">设置</button>
-        </div>
-      </div>
-      <div class="filter-row" id="filterRow">
-        <button class="filter-btn" :class="{ active: library.isFilterActive('year') }" data-filter="year" @click="openFilter('year', $event)">年份 <span class="arrow">&#9660;</span></button>
-        <button class="filter-btn" :class="{ active: library.isFilterActive('studio') }" data-filter="studio" @click="openFilter('studio', $event)">制作商 <span class="arrow">&#9660;</span></button>
-        <span class="filter-sep"></span>
-        <button class="filter-btn" :class="{ active: library.isFilterActive('story') }" data-filter="story" @click="openFilter('story', $event)">剧情 <span class="arrow">&#9660;</span></button>
-        <button class="filter-btn" :class="{ active: library.isFilterActive('attr') }" data-filter="attr" @click="openFilter('attr', $event)">属性 <span class="arrow">&#9660;</span></button>
-        <button class="filter-btn" :class="{ active: library.isFilterActive('scene') }" data-filter="scene" @click="openFilter('scene', $event)">场景 <span class="arrow">&#9660;</span></button>
-        <span class="filter-sep"></span>
-        <button class="filter-btn" id="sortTimeBtn" data-sort="time-desc" @click="library.toggleTimeSort">时间 {{ library.currentSort === 'time-desc' ? '⬇' : '⬆' }}</button>
-        <button class="filter-btn" id="sortNameBtn" data-sort="name-asc" @click="library.toggleNameSort">名称 {{ library.currentSort === 'name-desc' ? '⬇' : '⬆' }}</button>
-      </div>
-      <div ref="gridElement" class="cover-grid" id="coverGrid" @contextmenu="showHomeMenu">
+      <div ref="gridElement" class="cover-grid" id="coverGrid" :style="gridStyle" @contextmenu="showHomeMenu">
         <div v-if="library.loading" class="loading">&#128269; 加载作品数据...</div>
         <div v-else-if="library.disconnected" class="empty-state"><h2>Tauri 未连接</h2><p>请在 Tauri 窗口中打开此页面</p></div>
         <div v-else-if="library.error" class="empty-state"><h2>加载失败</h2><p>{{ library.error }}</p></div>
@@ -146,28 +106,5 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <Teleport to="body">
-      <div v-if="library.openDropdown" id="filterDropdown" class="filter-dd" :class="{ 'year-dd': library.openDropdown === 'year' }" :data-key="library.openDropdown" :style="dropdownStyle" @click.stop>
-        <template v-if="library.openDropdown === 'year'">
-          <div class="year-list">
-            <button v-for="year in library.years" :key="year" class="year-option" :class="{ selected: library.isSelected('year', String(year)) }" @click="library.toggleWholeYear(year)">{{ year }}年</button>
-          </div>
-          <div class="month-panel">
-            <div class="dd-header">{{ library.dropdownYear }}年</div>
-            <div class="month-grid">
-              <button v-for="month in 12" :key="month" class="month-cell" :class="{ selected: library.isSelected('year', `${library.dropdownYear}-${String(month).padStart(2, '0')}`) }" @click="library.toggleYearMonth(`${library.dropdownYear}-${String(month).padStart(2, '0')}`)">{{ month }}月</button>
-            </div>
-            <div class="dd-actions"><span @click="library.clearFilter('year')">清除</span><span @click="library.dropdownYear = library.dropdownYear">只看月份</span><span class="primary" @click="library.closeDropdown">确定</span></div>
-          </div>
-        </template>
-        <template v-else>
-          <div class="dd-header">{{ { studio: '制作商', story: '剧情', attr: '属性', scene: '场景' }[library.openDropdown] }}</div>
-          <div class="dd-body" :class="library.openDropdown === 'studio' ? 'col' : 'row'">
-            <button v-for="option in genericOptions" :key="option.value" class="dd-tag" :class="{ selected: library.isSelected(library.openDropdown!, option.value) }" @click="library.toggleFilter(library.openDropdown!, option.value)">{{ option.label }}</button>
-          </div>
-          <div class="dd-actions"><span @click="library.clearFilter(library.openDropdown!)">清除</span><span class="primary" @click="library.closeDropdown">确定</span></div>
-        </template>
-      </div>
-    </Teleport>
   </div>
 </template>

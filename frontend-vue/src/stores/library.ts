@@ -18,9 +18,64 @@ export interface DropdownPosition {
   width: number;
 }
 
+export interface CoverGridLayout {
+  columns: number;
+  rows: number;
+  cardWidth: number;
+}
+
+export function calculateCoverGridLayout(
+  width: number,
+  height: number,
+  paddingX: number,
+  paddingY: number,
+): CoverGridLayout {
+  const contentWidth = Math.max(0, width - paddingX);
+  const contentHeight = Math.max(0, height - paddingY);
+  const gapX = 18;
+  const gapY = 22;
+  const titleHeight = 44;
+  let best: (CoverGridLayout & { score: number }) | null = null;
+
+  for (let rows = 1; rows <= 5; rows += 1) {
+    for (let columns = 2; columns <= 12; columns += 1) {
+      const widthLimit = (contentWidth - gapX * (columns - 1)) / columns;
+      const heightLimit = ((contentHeight - gapY * (rows - 1)) / rows - titleHeight) * 3 / 4;
+      const cardWidth = Math.floor(Math.min(210, widthLimit, heightLimit));
+      if (cardWidth < 132) continue;
+      const usedWidth = cardWidth * columns + gapX * (columns - 1);
+      const usedHeight = rows * (cardWidth * 4 / 3 + titleHeight) + gapY * (rows - 1);
+      const widthUse = usedWidth / contentWidth;
+      const heightUse = usedHeight / contentHeight;
+      const score = widthUse * heightUse - Math.abs(widthUse - heightUse) * .08 - Math.abs(cardWidth - 184) * .0002;
+      if (!best || score > best.score) best = { columns, rows, cardWidth, score };
+    }
+  }
+
+  return best || { columns: 1, rows: 1, cardWidth: Math.max(120, Math.min(210, Math.floor(contentWidth))) };
+}
+
 export interface ReloadOptions {
   resetFilters?: boolean;
   clearCoverCache?: boolean;
+}
+
+interface PendingCoverLoad {
+  generation: number;
+  promise: Promise<void>;
+}
+
+const pendingCoverLoads = new Map<string, PendingCoverLoad>();
+let coverPrefetchRun = 0;
+
+function waitForBrowserIdle(): Promise<void> {
+  return new Promise((resolve) => {
+    if ('requestIdleCallback' in window) {
+      window.requestIdleCallback(() => resolve(), { timeout: 120 });
+    } else {
+      globalThis.setTimeout(resolve, 16);
+    }
+  });
 }
 
 const categoryByFilter: Partial<Record<FilterKey, string>> = {
@@ -39,9 +94,14 @@ export function filterWorks(
   activeFilters: Record<string, Record<string, boolean>>,
   search: string,
   sort: SortKey,
+  favoriteCharacters: string[] = [],
+  favoriteCharacterMode = false,
 ): WorkSummary[] {
   const keyword = search.trim().toLowerCase();
-  const results = works.filter((work) => Object.entries(activeFilters).every(([key, selected]) => {
+  const favoriteNames = new Set(favoriteCharacters);
+  const results = works.filter((work) => !favoriteCharacterMode
+    || (work.tags || []).some((tag) => tag.category === '人物' && favoriteNames.has(tag.name)))
+    .filter((work) => Object.entries(activeFilters).every(([key, selected]) => {
     const values = Object.keys(selected);
     if (!values.length) return true;
     if (key === 'year') {
@@ -52,6 +112,7 @@ export function filterWorks(
     return !category || (work.tags || []).some((tag) => tag.category === category && values.includes(tag.name));
   })).filter((work) => !keyword
     || work.title.toLowerCase().includes(keyword)
+    || (work.search_aliases || []).some((alias) => alias.toLowerCase().includes(keyword))
     || (work.description || '').toLowerCase().includes(keyword)
     || (work.studio || '').toLowerCase().includes(keyword)
     || (work.tags || []).some((tag) => tag.name.toLowerCase().includes(keyword)));
@@ -77,6 +138,17 @@ export function paginationItems(currentPage: number, totalPages: number): Pagina
   return items;
 }
 
+export function coverPathsForWorks(works: WorkSummary[]): string[] {
+  return [...new Set(works.map((work) => work.cover_path).filter((path): path is string => Boolean(path)))];
+}
+
+export function worksForPage(works: WorkSummary[], page: number, pageSize: number): WorkSummary[] {
+  const safeSize = Math.max(1, Math.floor(pageSize) || 1);
+  const safePage = Math.max(1, Math.floor(page) || 1);
+  const start = (safePage - 1) * safeSize;
+  return works.slice(start, start + safeSize);
+}
+
 export const useLibraryStore = defineStore('library', {
   state: () => ({
     works: [] as WorkSummary[],
@@ -86,6 +158,9 @@ export const useLibraryStore = defineStore('library', {
     coverCache: {} as Record<string, string>,
     activeFilters: {} as Record<string, Record<string, boolean>>,
     search: '',
+    favoriteCharacters: [] as string[],
+    favoriteCharacterMode: false,
+    favoriteCharacterSaving: [] as string[],
     currentSort: 'time-desc' as SortKey,
     currentPage: 1,
     pageSize: 20,
@@ -97,10 +172,11 @@ export const useLibraryStore = defineStore('library', {
     loading: false,
     disconnected: false,
     error: '',
+    coverGeneration: 0,
   }),
   getters: {
     filteredWorks(state): WorkSummary[] {
-      return filterWorks(state.works, state.activeFilters, state.search, state.currentSort);
+      return filterWorks(state.works, state.activeFilters, state.search, state.currentSort, state.favoriteCharacters, state.favoriteCharacterMode);
     },
     totalPages(): number {
       return Math.max(1, Math.ceil(this.filteredWorks.length / this.pageSize));
@@ -117,7 +193,7 @@ export const useLibraryStore = defineStore('library', {
       return Object.values(state.activeFilters).some((selected) => Object.keys(selected).length > 0);
     },
     showClearButton(): boolean {
-      return Boolean(this.search.trim()) || this.hasActiveFilters;
+      return Boolean(this.search.trim()) || this.hasActiveFilters || this.favoriteCharacterMode;
     },
   },
   actions: {
@@ -140,10 +216,11 @@ export const useLibraryStore = defineStore('library', {
         this.closeDropdown();
         return;
       }
-      const width = Math.min(key === 'year' ? 392 : key === 'studio' ? 180 : 480, window.innerWidth - 20);
+      const width = Math.min(key === 'year' ? 410 : key === 'studio' ? 180 : 480, window.innerWidth - 20);
       const bounds = button.getBoundingClientRect();
       const half = width / 2;
-      const left = Math.max(4 + half, Math.min(window.innerWidth - 4 - half, bounds.left + bounds.width / 2));
+      const shellInset = 64 + 8;
+      const left = Math.max(shellInset + half, Math.min(window.innerWidth - 8 - half, bounds.left + bounds.width / 2));
       this.dropdownPosition = { top: bounds.bottom + 2, left, width };
       this.openDropdown = key;
       if (key === 'year') this.dropdownYear = this.years[0] || new Date().getFullYear();
@@ -176,6 +253,31 @@ export const useLibraryStore = defineStore('library', {
     clearSearchAndFilters(): void {
       this.search = '';
       this.activeFilters = {};
+      this.favoriteCharacterMode = false;
+      this.currentPage = 1;
+      this.closeDropdown();
+    },
+    isFavoriteCharacter(name: string): boolean {
+      return this.favoriteCharacters.includes(name);
+    },
+    async toggleFavoriteCharacter(name: string): Promise<void> {
+      const normalized = name.trim();
+      if (!normalized || this.favoriteCharacterSaving.includes(normalized)) return;
+      this.favoriteCharacterSaving.push(normalized);
+      try {
+        const favorite = !this.isFavoriteCharacter(normalized);
+        this.favoriteCharacters = await invokeTauri<string[]>('set_character_favorite', { characterName: normalized, favorite });
+        if (!this.favoriteCharacters.length) this.favoriteCharacterMode = false;
+        this.currentPage = 1;
+      } catch (error) {
+        console.error('toggle favorite character failed:', error);
+      } finally {
+        this.favoriteCharacterSaving = this.favoriteCharacterSaving.filter((item) => item !== normalized);
+      }
+    },
+    toggleFavoriteCharacterMode(): void {
+      if (!this.favoriteCharacters.length) return;
+      this.favoriteCharacterMode = !this.favoriteCharacterMode;
       this.currentPage = 1;
       this.closeDropdown();
     },
@@ -189,19 +291,14 @@ export const useLibraryStore = defineStore('library', {
     toggleNameSort(): void {
       this.setSort(this.currentSort === 'name-asc' ? 'name-desc' : 'name-asc');
     },
-    goPage(page: number): void {
-      this.currentPage = Math.max(1, Math.min(this.totalPages, Math.floor(page) || 1));
+    async goPage(page: number): Promise<void> {
+      const target = Math.max(1, Math.min(this.totalPages, Math.floor(page) || 1));
+      if (target === this.currentPage) return;
+      await this.loadCovers(coverPathsForWorks(worksForPage(this.filteredWorks, target, this.pageSize)));
+      this.currentPage = Math.max(1, Math.min(this.totalPages, target));
     },
-    updatePageSize(width: number, height: number, paddingX: number, paddingY: number, preservePosition: boolean): void {
-      const cardWidth = 158;
-      const cardHeight = 255;
-      const gap = 16;
-      const contentWidth = width - paddingX;
-      const contentHeight = height - paddingY;
-      if (contentWidth < cardWidth || contentHeight < cardHeight) return;
-      const columns = Math.max(1, Math.floor((contentWidth + gap) / (cardWidth + gap)));
-      const rows = Math.max(1, Math.floor((contentHeight + gap) / (cardHeight + gap)));
-      const nextSize = columns * rows;
+    updatePageSize(nextSize: number, preservePosition: boolean): void {
+      nextSize = Math.max(1, Math.floor(nextSize) || 1);
       if (nextSize === this.pageSize) return;
       const firstIndex = (this.currentPage - 1) * this.pageSize;
       this.pageSize = nextSize;
@@ -211,13 +308,62 @@ export const useLibraryStore = defineStore('library', {
       return path ? this.coverCache[path] || '' : '';
     },
     async loadCovers(paths: string[]): Promise<void> {
-      const needed = [...new Set(paths.filter((path) => path && !this.coverCache[path]))];
-      if (!needed.length) return;
-      try {
-        const result = await invokeTauri<Array<[string, string]>>('load_cover_cache', { coverPaths: needed });
-        result.forEach(([path, dataUrl]) => { this.coverCache[path] = dataUrl; });
-      } catch (error) {
-        console.error('load covers failed:', error);
+      const generation = this.coverGeneration;
+      const waits: Promise<void>[] = [];
+      const needed: string[] = [];
+      [...new Set(paths.filter(Boolean))].forEach((path) => {
+        if (this.coverCache[path]) return;
+        const pending = pendingCoverLoads.get(path);
+        if (pending?.generation === generation) waits.push(pending.promise);
+        else needed.push(path);
+      });
+      if (needed.length) {
+        let batch!: Promise<void>;
+        batch = (async () => {
+          try {
+            const result = await invokeTauri<Array<[string, string]>>('load_cover_cache', { coverPaths: needed });
+            if (generation === this.coverGeneration) {
+              this.coverCache = Object.assign({}, this.coverCache, Object.fromEntries(result));
+            }
+          } catch (error) {
+            console.error('load covers failed:', error);
+          } finally {
+            needed.forEach((path) => {
+              if (pendingCoverLoads.get(path)?.promise === batch) pendingCoverLoads.delete(path);
+            });
+          }
+        })();
+        needed.forEach((path) => pendingCoverLoads.set(path, { generation, promise: batch }));
+        waits.push(batch);
+      }
+      await Promise.all(waits);
+    },
+    async loadVisibleCovers(): Promise<void> {
+      await this.loadCovers(coverPathsForWorks(this.pagedWorks));
+    },
+    clearCoverCache(): void {
+      this.coverGeneration += 1;
+      coverPrefetchRun += 1;
+      pendingCoverLoads.clear();
+      this.coverCache = {};
+    },
+    async prefetchCovers(): Promise<void> {
+      const run = ++coverPrefetchRun;
+      const generation = this.coverGeneration;
+      const allWorks = this.filteredWorks;
+      const pageCount = Math.max(1, Math.ceil(allWorks.length / this.pageSize));
+      const pageOrder = [this.currentPage, this.currentPage + 1, this.currentPage - 1]
+        .filter((page, index, pages) => page >= 1 && page <= pageCount && pages.indexOf(page) === index);
+      for (const page of pageOrder) {
+        if (run !== coverPrefetchRun || generation !== this.coverGeneration) return;
+        await this.loadCovers(coverPathsForWorks(worksForPage(allWorks, page, this.pageSize)));
+      }
+      const priorityPaths = new Set(pageOrder.flatMap((page) => coverPathsForWorks(worksForPage(allWorks, page, this.pageSize))));
+      const remaining = coverPathsForWorks(allWorks).filter((path) => !priorityPaths.has(path));
+      for (let index = 0; index < remaining.length; index += 24) {
+        if (run !== coverPrefetchRun || generation !== this.coverGeneration) return;
+        await waitForBrowserIdle();
+        await this.loadCovers(remaining.slice(index, index + 24));
       }
     },
     async reloadCoverCache(path?: string): Promise<void> {
@@ -234,25 +380,28 @@ export const useLibraryStore = defineStore('library', {
       this.clearSearchAndFilters();
     },
     async initialize(): Promise<void> {
-      this.loading = true;
+      this.loading = this.works.length === 0;
       this.disconnected = false;
       this.error = '';
       try {
-        const [works, tags, studios] = await Promise.all([
+        const [works, tags, studios, favoriteCharacters] = await Promise.all([
           invokeTauri<WorkSummary[]>('get_all_works_with_tags'),
           invokeTauri<TagSummary[]>('get_tags'),
           invokeTauri<string[]>('get_studios'),
+          invokeTauri<string[]>('get_favorite_characters'),
         ]);
         this.works = works || [];
         this.tags = tags || [];
         this.studios = studios || [];
+        this.favoriteCharacters = favoriteCharacters || [];
+        if (!this.favoriteCharacters.length) this.favoriteCharacterMode = false;
         const years = new Set<number>();
         this.works.forEach((work) => releaseDates(work).forEach((date) => {
           const year = Number.parseInt(date.slice(0, 4), 10);
           if (Number.isFinite(year)) years.add(year);
         }));
         this.years = [...years].sort((left, right) => right - left);
-        await this.loadCovers(this.works.flatMap((work) => work.cover_path ? [work.cover_path] : []));
+        void this.prefetchCovers();
       } catch (error) {
         console.error('library initialization failed:', error);
         this.error = '请检查 Tauri 后端是否正常运行';
@@ -262,7 +411,7 @@ export const useLibraryStore = defineStore('library', {
     },
     async reload(options: ReloadOptions = {}): Promise<void> {
       if (options.resetFilters) this.resetHomeFilters();
-      if (options.clearCoverCache) this.coverCache = {};
+      if (options.clearCoverCache) this.clearCoverCache();
       await this.initialize();
     },
     async refreshHome(options: ReloadOptions = {}): Promise<void> {

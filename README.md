@@ -23,9 +23,9 @@ The application is designed for offline use. It keeps its index beside the execu
 - Vue 3, TypeScript, Pinia, and Vite
 - libmpv
 
-## Version 2.0
+## Version 3.0
 
-Version 2.0 completes the Vue 3 and TypeScript frontend migration, replacing the previous monolithic HTML and JavaScript runtime while preserving the visual contract and native backend integration.
+Version 3.0 builds on the completed Vue 3 and TypeScript migration with a unified desktop shell, refined filtering, theme transitions, and a more robust native playback surface.
 
 - Vue single-file components define the page structure.
 - Pinia stores own shared state and long-running workflows.
@@ -34,6 +34,8 @@ Version 2.0 completes the Vue 3 and TypeScript frontend migration, replacing the
 - Automated tests cover library filtering, pagination, indexing, incomplete-entry summaries, size formatting, player display rules, playlist transitions, and timeline preview planning.
 - Architecture checks enforce zero global compatibility bridges, zero application DOM queries, and zero HTML string injection.
 - A UI contract check protects stable element identifiers and rejects inline HTML event handlers.
+- Shared shell controls keep navigation and window behavior consistent across library, detail, workspace, settings, and playback views.
+- Native playback now preserves monitor placement, maximized state, fullscreen bounds, and media-handle cleanup more reliably.
 
 ## Project Layout
 
@@ -70,6 +72,8 @@ cargo tauri build
 ## Data Policy
 
 Personal databases, local media, generated backups, and release archives are excluded from source control. Runtime data should be backed up separately.
+
+Metadata may include an optional top-level `search_aliases` string array. These aliases are imported into the portable index and used only for local search; the original title remains unchanged and aliases are not displayed in library or detail views.
 
 ## Status
 

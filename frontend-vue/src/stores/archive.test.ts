@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getUnarchivedIndexLetter, summarizeUnarchivedReasons, type UnarchivedItem } from './archive';
+import { getUnarchivedIndexLetter, restoredUnarchivedScrollTop, summarizeUnarchivedReasons, type UnarchivedItem } from './archive';
 
 function item(overrides: Partial<UnarchivedItem> = {}): UnarchivedItem {
   return {
@@ -37,5 +37,17 @@ describe('unarchived reason summary', () => {
       has_meta_json: false,
       missing_reasons: ['视频文件名缺少数字编号', '缺少主封面', '缺少第1集封面'],
     }))).toEqual(['缺少 data 文件夹', '缺少 meta.json', '视频编号有误', '缺少主封面', '集数封面不齐全']);
+  });
+});
+
+describe('unarchived position restoration', () => {
+  it('keeps the focused card at its previous viewport offset', () => {
+    expect(restoredUnarchivedScrollTop(820, 2400, 1060, 240)).toBe(820);
+    expect(restoredUnarchivedScrollTop(820, 2400, 980, 240)).toBe(740);
+  });
+
+  it('falls back to the saved position and clamps a shortened list', () => {
+    expect(restoredUnarchivedScrollTop(820, 2400)).toBe(820);
+    expect(restoredUnarchivedScrollTop(820, 500)).toBe(500);
   });
 });

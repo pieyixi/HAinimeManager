@@ -241,6 +241,7 @@ fn make_archive_draft(dir_path: &str) -> Result<ArchiveDraft, String> {
         .collect::<Vec<_>>();
 
     let mut title = dir_name.clone();
+    let mut search_aliases = Vec::new();
     let mut studio = String::new();
     let mut synopsis = String::new();
     let mut characters = std::collections::HashMap::new();
@@ -261,6 +262,7 @@ fn make_archive_draft(dir_path: &str) -> Result<ArchiveDraft, String> {
             if let Some(value) = json.get("studio").and_then(|v| v.as_str()) {
                 studio = value.to_string();
             }
+            search_aliases = value_string_vec(json.get("search_aliases"));
             if let Some(value) = json.get("synopsis").and_then(|v| v.as_str()) {
                 synopsis = value.to_string();
             }
@@ -300,6 +302,7 @@ fn make_archive_draft(dir_path: &str) -> Result<ArchiveDraft, String> {
     Ok(ArchiveDraft {
         dir_path: dir_path.to_string(),
         title,
+        search_aliases,
         episodes: episode_list.len() as i32,
         studio,
         synopsis,
@@ -432,6 +435,107 @@ fn save_archive_episode_covers(input: ArchiveEpisodeCoverSaveInput) -> Result<Ve
     Ok(saved)
 }
 
+fn serialize_archive_meta(json: &ArchiveMetaOutput) -> Result<String, String> {
+    use std::fmt::Write as _;
+
+    fn encoded<T: serde::Serialize>(value: &T) -> Result<String, String> {
+        serde_json::to_string(value).map_err(|error| error.to_string())
+    }
+
+    fn compact_string_array(values: &[String]) -> Result<String, String> {
+        let items = values
+            .iter()
+            .map(encoded)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(format!("[{}]", items.join(", ")))
+    }
+
+    let mut output = String::new();
+    writeln!(output, "{{").unwrap();
+    writeln!(output, "  \"title\": {},", encoded(&json.title)?).unwrap();
+
+    if json.search_aliases.is_empty() {
+        writeln!(output, "  \"search_aliases\": [],").unwrap();
+    } else {
+        writeln!(output, "  \"search_aliases\": [").unwrap();
+        for (index, alias) in json.search_aliases.iter().enumerate() {
+            let comma = if index + 1 == json.search_aliases.len() { "" } else { "," };
+            writeln!(output, "    {}{}", encoded(alias)?, comma).unwrap();
+        }
+        writeln!(output, "  ],").unwrap();
+    }
+
+    writeln!(output, "  \"episodes\": {},", json.episodes).unwrap();
+    writeln!(output, "  \"characters\": {{").unwrap();
+    let mut characters = json.characters.iter().collect::<Vec<_>>();
+    characters.sort_by(|(left, _), (right, _)| {
+        match (left.parse::<u64>(), right.parse::<u64>()) {
+            (Ok(left_number), Ok(right_number)) => left_number
+                .cmp(&right_number)
+                .then_with(|| left.cmp(right)),
+            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+            (Err(_), Err(_)) => left.cmp(right),
+        }
+    });
+    for (index, (position, name)) in characters.iter().enumerate() {
+        let comma = if index + 1 == characters.len() { "" } else { "," };
+        writeln!(
+            output,
+            "    {}: {}{}",
+            encoded(position)?,
+            encoded(name)?,
+            comma
+        )
+        .unwrap();
+    }
+    writeln!(output, "  }},").unwrap();
+    writeln!(output, "  \"studio\": {},", encoded(&json.studio)?).unwrap();
+    writeln!(output, "  \"synopsis\": {},", encoded(&json.synopsis)?).unwrap();
+    writeln!(output, "  \"episode_list\": [").unwrap();
+    for (index, episode) in json.episode_list.iter().enumerate() {
+        writeln!(output, "    {{").unwrap();
+        writeln!(output, "      \"id\": {},", episode.id).unwrap();
+        writeln!(
+            output,
+            "      \"subtitle\": {},",
+            encoded(&episode.subtitle)?
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "      \"release_date\": {},",
+            encoded(&episode.release_date)?
+        )
+        .unwrap();
+        writeln!(output, "      \"tags\": {{").unwrap();
+        writeln!(
+            output,
+            "        \"theme\": {},",
+            compact_string_array(&episode.tags.theme)?
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "        \"attribute\": {},",
+            compact_string_array(&episode.tags.attribute)?
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "        \"scene\": {}",
+            compact_string_array(&episode.tags.scene)?
+        )
+        .unwrap();
+        writeln!(output, "      }}").unwrap();
+        let comma = if index + 1 == json.episode_list.len() { "" } else { "," };
+        writeln!(output, "    }}{}", comma).unwrap();
+    }
+    writeln!(output, "  ]").unwrap();
+    write!(output, "}}").unwrap();
+    Ok(output)
+}
+
 #[tauri::command]
 fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
     let path = std::path::Path::new(&input.dir_path);
@@ -458,6 +562,7 @@ fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
 
     let json = ArchiveMetaOutput {
         title: input.title,
+        search_aliases: input.search_aliases,
         episodes: episode_list.len(),
         characters: input.characters,
         studio: input.studio,
@@ -466,9 +571,54 @@ fn save_archive_draft(input: ArchiveSaveInput) -> Result<String, String> {
     };
 
     let out_path = data_dir.join("meta.json");
-    let json_str = serde_json::to_string_pretty(&json).map_err(|e| e.to_string())?;
+    let json_str = serialize_archive_meta(&json)?;
     std::fs::write(&out_path, json_str).map_err(|e| e.to_string())?;
     Ok(out_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod archive_meta_format_tests {
+    use super::{
+        serialize_archive_meta, ArchiveEpisodeMetaOutput, ArchiveEpisodeTags, ArchiveMetaOutput,
+    };
+    use std::collections::HashMap;
+
+    #[test]
+    fn keeps_character_positions_ordered_and_tag_arrays_compact() {
+        let mut characters = HashMap::new();
+        for position in (1..=12).rev() {
+            characters.insert(position.to_string(), format!("角色{}", position));
+        }
+        let meta = ArchiveMetaOutput {
+            title: "测试".to_string(),
+            search_aliases: vec!["测试别名".to_string()],
+            episodes: 1,
+            characters,
+            studio: "制作商".to_string(),
+            synopsis: "第一行\n第二行".to_string(),
+            episode_list: vec![ArchiveEpisodeMetaOutput {
+                id: 1,
+                subtitle: String::new(),
+                release_date: "2026-08".to_string(),
+                tags: ArchiveEpisodeTags {
+                    theme: vec!["纯爱".to_string(), "后宫".to_string()],
+                    attribute: vec!["姐".to_string()],
+                    scene: vec!["内射".to_string(), "口交".to_string()],
+                },
+            }],
+        };
+
+        let output = serialize_archive_meta(&meta).unwrap();
+        serde_json::from_str::<serde_json::Value>(&output).unwrap();
+
+        let role_positions = (1..=12)
+            .map(|position| output.find(&format!("\"{}\":", position)).unwrap())
+            .collect::<Vec<_>>();
+        assert!(role_positions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(output.contains("\"theme\": [\"纯爱\", \"后宫\"]"));
+        assert!(output.contains("\"attribute\": [\"姐\"]"));
+        assert!(output.contains("\"scene\": [\"内射\", \"口交\"]"));
+    }
 }
 
 fn validate_archive_meta_json(json: &serde_json::Value, dir_path: &str) -> Vec<String> {

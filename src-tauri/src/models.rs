@@ -48,6 +48,7 @@ pub struct WorkWithTags {
     pub folder_path: String,
     pub episode_count: i64,
     pub release_dates: Vec<String>,
+    pub search_aliases: Vec<String>,
     pub tags: Vec<Tag>,
 }
 
@@ -80,6 +81,7 @@ pub struct ArchiveEpisodeDraft {
 pub struct ArchiveDraft {
     pub dir_path: String,
     pub title: String,
+    pub search_aliases: Vec<String>,
     pub episodes: i32,
     pub studio: String,
     pub synopsis: String,
@@ -94,6 +96,8 @@ pub struct ArchiveDraft {
 pub struct ArchiveSaveInput {
     pub dir_path: String,
     pub title: String,
+    #[serde(default)]
+    pub search_aliases: Vec<String>,
     pub studio: String,
     pub synopsis: String,
     pub characters: std::collections::HashMap<String, String>,
@@ -112,6 +116,7 @@ struct ArchiveEpisodeMetaOutput {
 #[derive(Debug, Serialize)]
 struct ArchiveMetaOutput {
     title: String,
+    search_aliases: Vec<String>,
     episodes: usize,
     characters: std::collections::HashMap<String, String>,
     studio: String,
@@ -213,6 +218,8 @@ struct EpisodeMeta {
 #[derive(Debug, Deserialize)]
 struct WorkMeta {
     title: String,
+    #[serde(default)]
+    search_aliases: Vec<String>,
     release: Option<String>,
     studio: Option<String>,
     synopsis: Option<String>,

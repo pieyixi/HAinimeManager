@@ -200,43 +200,75 @@ struct ThumbnailRequest {
     video_path: ThumbnailPathBuf,
     time: f64,
     exact: bool,
+    generation: u64,
     response: mpsc::Sender<Result<String, String>>,
 }
 
+enum ThumbnailWorkerMessage {
+    Request(ThumbnailRequest),
+    Release {
+        generation: u64,
+        response: mpsc::Sender<()>,
+    },
+}
+
 struct ThumbnailWorker {
-    sender: mpsc::Sender<ThumbnailRequest>,
+    sender: mpsc::Sender<ThumbnailWorkerMessage>,
 }
 
 impl ThumbnailWorker {
     fn start() -> Self {
-        let (sender, receiver) = mpsc::channel::<ThumbnailRequest>();
+        let (sender, receiver) = mpsc::channel::<ThumbnailWorkerMessage>();
         std::thread::Builder::new()
             .name("timeline-thumbnail-decoder".to_string())
             .spawn(move || {
                 let mut decoder: Option<ThumbnailDecoder> = None;
-                while let Ok(request) = receiver.recv() {
-                    let result = if decoder
-                        .as_ref()
-                        .map(|value| value.video_path.as_path())
-                        != Some(request.video_path.as_path())
-                    {
-                        match ThumbnailDecoder::open(&request.video_path, request.time) {
-                            Ok((value, first_frame)) => {
-                                decoder = Some(value);
-                                Ok(first_frame)
+                let mut active_generation = 0;
+                loop {
+                    match receiver.recv_timeout(Duration::from_secs(5)) {
+                        Ok(ThumbnailWorkerMessage::Request(request)) => {
+                            if request.generation < active_generation {
+                                let _ = request.response.send(Err("缩略图请求已取消".to_string()));
+                                continue;
                             }
-                            Err(error) => {
+                            if request.generation > active_generation {
+                                active_generation = request.generation;
                                 decoder = None;
-                                Err(error)
                             }
+                            let result = if decoder
+                                .as_ref()
+                                .map(|value| value.video_path.as_path())
+                                != Some(request.video_path.as_path())
+                            {
+                                match ThumbnailDecoder::open(&request.video_path, request.time) {
+                                    Ok((value, first_frame)) => {
+                                        decoder = Some(value);
+                                        Ok(first_frame)
+                                    }
+                                    Err(error) => {
+                                        decoder = None;
+                                        Err(error)
+                                    }
+                                }
+                            } else {
+                                decoder
+                                    .as_mut()
+                                    .expect("matching decoder must exist")
+                                    .frame_at(request.time, request.exact)
+                            };
+                            let _ = request.response.send(result);
                         }
-                    } else {
-                        decoder
-                            .as_mut()
-                            .expect("matching decoder must exist")
-                            .frame_at(request.time, request.exact)
-                    };
-                    let _ = request.response.send(result);
+                        Ok(ThumbnailWorkerMessage::Release {
+                            generation,
+                            response,
+                        }) => {
+                            active_generation = active_generation.max(generation);
+                            decoder = None;
+                            let _ = response.send(());
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => decoder = None,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    }
                 }
             })
             .expect("failed to start timeline thumbnail decoder");
@@ -248,19 +280,34 @@ impl ThumbnailWorker {
         video_path: ThumbnailPathBuf,
         time: f64,
         exact: bool,
+        generation: u64,
     ) -> Result<String, String> {
         let (response_sender, response_receiver) = mpsc::channel();
         self.sender
-            .send(ThumbnailRequest {
+            .send(ThumbnailWorkerMessage::Request(ThumbnailRequest {
                 video_path,
                 time,
                 exact,
+                generation,
+                response: response_sender,
+            }))
+            .map_err(|_| "缩略图解码线程已停止".to_string())?;
+        response_receiver
+            .recv_timeout(Duration::from_secs(5))
+            .map_err(|_| "缩略图解码响应超时".to_string())?
+    }
+
+    fn release(&self, generation: u64) -> Result<(), String> {
+        let (response_sender, response_receiver) = mpsc::channel();
+        self.sender
+            .send(ThumbnailWorkerMessage::Release {
+                generation,
                 response: response_sender,
             })
             .map_err(|_| "缩略图解码线程已停止".to_string())?;
         response_receiver
             .recv_timeout(Duration::from_secs(5))
-            .map_err(|_| "缩略图解码响应超时".to_string())?
+            .map_err(|_| "缩略图解码器释放超时".to_string())
     }
 }
 
@@ -279,6 +326,7 @@ async fn get_video_thumbnail(
     video_path: String,
     time: f64,
     exact: Option<bool>,
+    generation: u64,
 ) -> Result<CapturedFrameData, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let image_data = INTERACTIVE_THUMBNAIL_WORKER
@@ -287,6 +335,7 @@ async fn get_video_thumbnail(
                 ThumbnailPathBuf::from(video_path),
                 time,
                 exact.unwrap_or(false),
+                generation,
             )?;
         Ok(CapturedFrameData { image_data })
     })
@@ -295,14 +344,18 @@ async fn get_video_thumbnail(
 }
 
 #[tauri::command]
-async fn prime_video_thumbnail(video_path: String) -> Result<CapturedFrameData, String> {
-    get_video_thumbnail(video_path, 0.0, Some(false)).await
+async fn prime_video_thumbnail(
+    video_path: String,
+    generation: u64,
+) -> Result<CapturedFrameData, String> {
+    get_video_thumbnail(video_path, 0.0, Some(false), generation).await
 }
 
 #[tauri::command]
 async fn prefetch_video_thumbnails(
     video_path: String,
     times: Vec<f64>,
+    generation: u64,
 ) -> Result<Vec<TimelineThumbnailFrame>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let _batch_guard = PREFETCH_BATCH_LOCK
@@ -314,13 +367,37 @@ async fn prefetch_video_thumbnails(
         let mut frames = Vec::with_capacity(times.len());
         for time in times.into_iter().take(24) {
             let safe_time = time.max(0.0);
-            let image_data = worker.request(path.clone(), safe_time, false)?;
+            let image_data = worker.request(path.clone(), safe_time, false, generation)?;
             frames.push(TimelineThumbnailFrame {
                 time: safe_time,
                 image_data,
             });
         }
         Ok(frames)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn release_video_thumbnail_decoders(generation: u64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut errors = Vec::new();
+        if let Some(worker) = INTERACTIVE_THUMBNAIL_WORKER.get() {
+            if let Err(error) = worker.release(generation) {
+                errors.push(error);
+            }
+        }
+        if let Some(worker) = PREFETCH_THUMBNAIL_WORKER.get() {
+            if let Err(error) = worker.release(generation) {
+                errors.push(error);
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("；"))
+        }
     })
     .await
     .map_err(|e| e.to_string())?
@@ -355,6 +432,23 @@ mod thumbnail_tests {
             index += length + 2;
         }
         None
+    }
+
+    #[test]
+    fn released_worker_rejects_stale_requests_before_opening_a_file() {
+        let worker = ThumbnailWorker::start();
+        worker.release(7).unwrap();
+
+        let error = worker
+            .request(
+                ThumbnailPathBuf::from("this-file-must-not-be-opened.mp4"),
+                0.0,
+                false,
+                6,
+            )
+            .unwrap_err();
+
+        assert_eq!(error, "缩略图请求已取消");
     }
 
     #[test]

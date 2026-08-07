@@ -5,9 +5,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_libmpv::init())
         .manage(db)
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                sync_player_fullscreen_focus(window, *focused);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_all_works_with_tags,
             get_work_detail,
+            get_favorite_characters,
+            set_character_favorite,
             get_tags,
             initialize_media_library,
             bind_media_library,
@@ -23,6 +30,7 @@ pub fn run() {
             get_video_thumbnail,
             prime_video_thumbnail,
             prefetch_video_thumbnails,
+            release_video_thumbnail_decoders,
             backup_database,
             backup_data_package,
             restore_database,

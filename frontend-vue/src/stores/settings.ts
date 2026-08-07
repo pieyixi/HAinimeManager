@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { invokeTauri } from '../api/tauri';
+import { invokeTauri, listenTauri } from '../api/tauri';
 import { useAppStore } from './app';
 import { useLibraryStore } from './library';
 import { useNavigationStore } from './navigation';
@@ -19,11 +19,16 @@ interface LibrarySummary {
 }
 
 export interface ConsoleItem {
+  work_id?: number | null;
   title: string;
   status: string;
   folder_path: string;
   can_update?: boolean;
   new_episode_numbers?: number[];
+}
+
+export function isMissingDirectoryItem(item: ConsoleItem): boolean {
+  return Number.isInteger(item.work_id) && item.status === '作品目录不存在';
 }
 
 export interface LibraryScan {
@@ -32,6 +37,11 @@ export interface LibraryScan {
   new_episode_works: ConsoleItem[];
   new_complete_works: ConsoleItem[];
   attention_works: ConsoleItem[];
+}
+
+interface BackupProgressEvent {
+  percent: number;
+  text: string;
 }
 
 interface DuplicateItem {
@@ -78,6 +88,7 @@ export const useSettingsStore = defineStore('settings', {
     summary: { archived_count: 0, unarchived_count: 0, episode_count: 0, total_bytes: 0 } as LibrarySummary,
     scan: null as LibraryScan | null,
     scanning: false,
+    backupRunning: false,
     progressActive: false,
     progressPercent: 0,
     progressText: '',
@@ -90,6 +101,7 @@ export const useSettingsStore = defineStore('settings', {
     totalWorks(): number { return this.archivedCount + this.unarchivedCount; },
     archivePercent(): number { return this.totalWorks ? Math.round(this.archivedCount / this.totalWorks * 100) : 0; },
     formattedSize: (state) => formatLibrarySize(state.summary.total_bytes),
+    busy: (state) => state.scanning || state.backupRunning,
     hasScanChanges: (state) => Boolean(state.scan && ['changed_works', 'new_episode_works', 'new_complete_works', 'attention_works']
       .some((key) => (state.scan?.[key as keyof LibraryScan] as ConsoleItem[] | undefined)?.length)),
   },
@@ -192,9 +204,32 @@ export const useSettingsStore = defineStore('settings', {
       if (item) await invokeTauri('open_folder', { path: item.folder_path });
     },
 
+    async deleteMissingDatabaseRecord(index: number): Promise<void> {
+      const item = this.items('attention_works')[index];
+      if (!item || !isMissingDirectoryItem(item) || item.work_id == null) return;
+      const confirmed = await useNavigationStore().askConfirm(
+        '删除数据库记录',
+        `作品“${item.title}”的目录已经不存在。确定只删除它的数据库记录？此操作不会删除任何磁盘文件。`,
+        '删除记录',
+        true,
+      );
+      if (!confirmed) return;
+      try {
+        await invokeTauri('delete_work', { workId: item.work_id });
+        if (this.scan) this.scan.attention_works.splice(index, 1);
+        await Promise.all([
+          useLibraryStore().reload({ resetFilters: false, clearCoverCache: true }),
+          this.loadSummary(),
+        ]);
+        this.libraryMessage = { kind: 'success', text: `已删除“${item.title}”的数据库记录` };
+      } catch (error) {
+        this.libraryMessage = { kind: 'err', text: `删除记录失败：${errorText(error)}` };
+      }
+    },
+
     async scanLibraryChanges(): Promise<void> {
       const path = this.mediaPath.trim();
-      if (!path || this.scanning) return;
+      if (!path || this.busy) return;
       this.scanning = true;
       this.scan = null;
       let percent = 8;
@@ -279,12 +314,26 @@ export const useSettingsStore = defineStore('settings', {
     },
 
     async backupDataPackage(): Promise<void> {
+      if (this.busy) return;
       const path = this.backupPath.trim() || 'D:\\Ark\\hanime-data-backup.zip';
+      this.backupRunning = true;
+      this.databaseMessage = null;
+      this.setProgress(true, 1, '正在准备资料包备份');
+      let stopProgress: (() => void) | undefined;
       try {
+        stopProgress = await listenTauri<BackupProgressEvent>('backup-data-package-progress', (progress) => {
+          this.setProgress(true, progress.percent, progress.text);
+        });
         const result = await invokeTauri<string>('backup_data_package', { backupPath: path });
+        this.setProgress(true, 100, '资料包备份完成');
         this.databaseMessage = { kind: 'info', text: `资料包备份成功: ${result}` };
+        await new Promise((resolve) => window.setTimeout(resolve, 650));
       } catch (error) {
         this.databaseMessage = { kind: 'err', text: `资料包备份失败: ${errorText(error)}` };
+      } finally {
+        stopProgress?.();
+        this.backupRunning = false;
+        this.setProgress(false, 0, '');
       }
     },
 

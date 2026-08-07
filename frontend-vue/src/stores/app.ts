@@ -7,6 +7,7 @@ export interface WorkSummary {
   month?: number | string;
   studio?: string;
   description?: string;
+  search_aliases?: string[];
   release_dates?: string[];
   cover_path?: string;
   tags?: TagSummary[];
@@ -54,6 +55,7 @@ export interface ArchiveEpisode {
 
 export interface ArchiveDraft {
   title: string;
+  search_aliases: string[];
   studio: string;
   synopsis: string;
   characters: Record<string, string>;
@@ -66,6 +68,8 @@ export const useAppStore = defineStore('app', {
   state: () => ({
     unarchivedScrollTop: 0,
     unarchivedActiveIndex: '',
+    unarchivedFocusPath: '',
+    unarchivedFocusOffset: 0,
     mediaLibrary: null as unknown,
     archive: {
       draft: null as ArchiveDraft | null,

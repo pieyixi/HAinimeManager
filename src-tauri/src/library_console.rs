@@ -112,6 +112,29 @@ fn cover_signature(folder: &Path) -> String {
     format!("{:016x}", fnv1a(parts.join("|").as_bytes()))
 }
 
+fn normalized_video_path(path: &str) -> String {
+    path.replace('\\', "/").to_lowercase()
+}
+
+fn changed_video_numbers(
+    disk_videos: &HashMap<i32, String>,
+    database_videos: &HashMap<i32, String>,
+) -> Vec<i32> {
+    let mut changed: Vec<i32> = disk_videos
+        .iter()
+        .filter_map(|(number, disk_path)| {
+            database_videos
+                .get(number)
+                .filter(|database_path| {
+                    normalized_video_path(database_path) != normalized_video_path(disk_path)
+                })
+                .map(|_| *number)
+        })
+        .collect();
+    changed.sort_unstable();
+    changed
+}
+
 fn save_library_snapshot(conn: &Connection, work_id: i64, folder_path: &str) -> Result<(), String> {
     let folder = Path::new(folder_path);
     conn.execute(
@@ -137,6 +160,7 @@ fn semantic_meta_matches_database(
         serde_json::from_str(&content).map_err(|e| format!("meta.json 格式错误: {}", e))?;
     let WorkMeta {
         title,
+        search_aliases,
         release,
         studio,
         synopsis,
@@ -151,11 +175,11 @@ fn semantic_meta_matches_database(
         .and_then(parse_year_month)
         .or_else(|| release.as_deref().and_then(parse_year_month))
         .unwrap_or((2024, 1));
-    let current: (String, i32, i32, String, String) = conn
+    let current: (String, i32, i32, String, String, String) = conn
         .query_row(
-            "SELECT Title, Year, Month, Studio, COALESCE(Description, '') FROM Works WHERE Id=?1",
+            "SELECT Title, Year, Month, Studio, COALESCE(Description, ''), SearchAliases FROM Works WHERE Id=?1",
             params![work_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
         )
         .map_err(|e| e.to_string())?;
     if current
@@ -165,6 +189,7 @@ fn semantic_meta_matches_database(
             expected_month,
             studio.unwrap_or_default(),
             synopsis.unwrap_or_default(),
+            serde_json::to_string(&search_aliases).map_err(|e| e.to_string())?,
         )
     {
         return Ok(false);
@@ -336,17 +361,22 @@ fn scan_library_changes(
                 continue;
             }
         };
-        let disk_numbers: HashSet<i32> = videos
+        let disk_videos: HashMap<i32, String> = videos
             .iter()
-            .filter_map(|path| episode_number_from_path(path))
+            .filter_map(|path| {
+                episode_number_from_path(path)
+                    .map(|number| (number, path.to_string_lossy().to_string()))
+            })
             .collect();
-        let db_numbers: HashSet<i32> = conn
-            .prepare("SELECT Number FROM Episodes WHERE WorkId=?1")
+        let database_videos: HashMap<i32, String> = conn
+            .prepare("SELECT Number, VideoPath FROM Episodes WHERE WorkId=?1")
             .map_err(|e| e.to_string())?
-            .query_map(params![work_id], |row| row.get(0))
+            .query_map(params![work_id], |row| Ok((row.get(0)?, row.get(1)?)))
             .map_err(|e| e.to_string())?
             .filter_map(Result::ok)
             .collect();
+        let disk_numbers: HashSet<i32> = disk_videos.keys().copied().collect();
+        let db_numbers: HashSet<i32> = database_videos.keys().copied().collect();
         let mut new_numbers: Vec<i32> = disk_numbers.difference(&db_numbers).copied().collect();
         new_numbers.sort_unstable();
         if !new_numbers.is_empty() {
@@ -357,6 +387,45 @@ fn scan_library_changes(
                 format!("发现 {} 个新增视频", new_numbers.len()),
                 new_numbers,
                 false,
+            ));
+            continue;
+        }
+        let mut missing_numbers: Vec<i32> = db_numbers.difference(&disk_numbers).copied().collect();
+        missing_numbers.sort_unstable();
+        if !missing_numbers.is_empty() {
+            result.attention_works.push(console_item(
+                Some(*work_id),
+                db_title.clone(),
+                folder_path,
+                format!(
+                    "缺少已入库视频：{}",
+                    missing_numbers
+                        .iter()
+                        .map(|number| format!("#{}", number))
+                        .collect::<Vec<_>>()
+                        .join("、")
+                ),
+                Vec::new(),
+                false,
+            ));
+            continue;
+        }
+        let changed_numbers = changed_video_numbers(&disk_videos, &database_videos);
+        if !changed_numbers.is_empty() {
+            result.changed_works.push(console_item(
+                Some(*work_id),
+                db_title.clone(),
+                folder_path,
+                format!(
+                    "视频格式或路径有变化：{}",
+                    changed_numbers
+                        .iter()
+                        .map(|number| format!("#{}", number))
+                        .collect::<Vec<_>>()
+                        .join("、")
+                ),
+                Vec::new(),
+                true,
             ));
             continue;
         }
@@ -452,4 +521,30 @@ fn apply_library_updates(folders: Vec<String>, db: State<Database>) -> Result<i3
     }
     transaction.commit().map_err(|e| e.to_string())?;
     Ok(folders.len() as i32)
+}
+
+#[cfg(test)]
+mod library_console_video_path_tests {
+    use super::changed_video_numbers;
+    use std::collections::HashMap;
+
+    #[test]
+    fn detects_extension_or_filename_changes_for_the_same_episode_number() {
+        let disk = HashMap::from([
+            (1, r"D:\Media\Work\Work #1.mp4".to_string()),
+            (2, r"D:\Media\Work\Renamed #2.mp4".to_string()),
+        ]);
+        let database = HashMap::from([
+            (1, r"D:\Media\Work\Work #1.mkv".to_string()),
+            (2, r"D:\Media\Work\Work #2.mp4".to_string()),
+        ]);
+        assert_eq!(changed_video_numbers(&disk, &database), vec![1, 2]);
+    }
+
+    #[test]
+    fn ignores_windows_case_and_separator_differences() {
+        let disk = HashMap::from([(1, r"D:\Media\Work\Work #1.mp4".to_string())]);
+        let database = HashMap::from([(1, "d:/media/work/work #1.mp4".to_string())]);
+        assert!(changed_video_numbers(&disk, &database).is_empty());
+    }
 }

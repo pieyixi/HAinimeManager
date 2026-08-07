@@ -1419,9 +1419,10 @@ dependencies = [
 
 [[package]]
 name = "hanime-manager"
-version = "2.1.0"
+version = "3.0.0"
 dependencies = [
  "base64 0.22.1",
+ "crc32fast",
  "libloading 0.8.9",
  "open",
  "rusqlite",
@@ -1431,6 +1432,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-libmpv",
  "tauri-plugin-opener",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

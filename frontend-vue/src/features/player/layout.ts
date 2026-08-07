@@ -1,6 +1,6 @@
-import type { PlayerMaskRect, PlayerStore } from '../../stores/player';
+import type { PlayerStore, PlayerVideoHole } from '../../stores/player';
 import { useNavigationStore } from '../../stores/navigation';
-import { mpvPlugin, mpvSetProperty } from './mpv';
+import { mpvPlugin } from './mpv';
 
 interface Bounds { left: number; top: number; right: number; bottom: number }
 
@@ -24,7 +24,7 @@ function clampBounds(rect: DOMRect, width: number, height: number): Bounds {
   return { left, top, right, bottom };
 }
 
-function maskRect(left: number, top: number, width: number, height: number): PlayerMaskRect {
+function videoHole(left: number, top: number, width: number, height: number): PlayerVideoHole {
   return { left, top, width: Math.max(0, width), height: Math.max(0, height) };
 }
 
@@ -40,35 +40,28 @@ export function createPlayerLayout(player: PlayerStore) {
 
   function applyHitTestGuard(bounds: Bounds): Bounds {
     const guarded = { ...bounds };
-    if (player.fullscreen && !player.controlsVisible) return guarded;
+    if (player.fullscreen) return guarded;
     const controlsTop = Math.round(elements.controls?.getBoundingClientRect().top ?? Number.NaN);
     if (Number.isFinite(controlsTop) && controlsTop <= guarded.bottom) guarded.bottom = Math.max(guarded.top + 1, controlsTop - 1);
     return guarded;
-  }
-
-  function updateMasks(bounds: Bounds, width: number, height: number): void {
-    const overlap = 2;
-    player.maskTop = maskRect(0, 0, width, bounds.top + overlap);
-    player.maskBottom = maskRect(0, Math.max(0, bounds.bottom - overlap), width, height - bounds.bottom + overlap);
-    player.maskLeft = maskRect(0, bounds.top, bounds.left + overlap, bounds.bottom - bounds.top);
-    player.maskRight = maskRect(Math.max(0, bounds.right - overlap), bounds.top, width - bounds.right + overlap, bounds.bottom - bounds.top);
   }
 
   async function syncBounds(): Promise<void> {
     if (!elements.stage) return;
     const viewport = viewportSize();
     const bounds = applyHitTestGuard(clampBounds(elements.stage.getBoundingClientRect(), viewport.width, viewport.height));
-    updateMasks(bounds, viewport.width, viewport.height);
-    if (!player.libmpvReady) return;
-    await mpvPlugin('set_video_margin_ratio', {
-      windowLabel: 'main',
-      ratio: {
+    if (player.libmpvReady) {
+      await mpvPlugin('set_video_margin_ratio', {
+        windowLabel: 'main',
+        ratio: {
         left: bounds.left / viewport.width,
         right: (viewport.width - bounds.right) / viewport.width,
         top: bounds.top / viewport.height,
         bottom: (viewport.height - bounds.bottom) / viewport.height,
-      },
-    }).catch(() => undefined);
+        },
+      }).catch(() => undefined);
+    }
+    player.videoHole = videoHole(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
   }
 
   function scheduleSync(): void {
@@ -86,18 +79,14 @@ export function createPlayerLayout(player: PlayerStore) {
   function showFullscreenControls(): void {
     if (!player.fullscreen || player.controlsVisible) return;
     player.controlsVisible = true;
-    if (player.libmpvReady) void mpvSetProperty('panscan', 1).catch(() => undefined);
-    scheduleSync();
   }
 
-  function hideFullscreenControls(applyFitMode: () => Promise<void>): void {
+  function hideFullscreenControls(): void {
     if (!player.fullscreen) return;
     const timer = window.setTimeout(() => {
       scheduled.delete(timer);
       if (elements.controls?.matches(':hover')) return;
       player.controlsVisible = false;
-      void applyFitMode();
-      scheduleSync();
     }, 120);
     scheduled.add(timer);
   }

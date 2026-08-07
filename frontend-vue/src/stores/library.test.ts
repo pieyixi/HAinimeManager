@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { WorkSummary } from './app';
-import { filterWorks, paginationItems } from './library';
+import { calculateCoverGridLayout, coverPathsForWorks, filterWorks, paginationItems, worksForPage } from './library';
 
 const works: WorkSummary[] = [
   {
@@ -10,6 +10,7 @@ const works: WorkSummary[] = [
     month: 2,
     studio: 'Studio A',
     description: 'first work',
+    search_aliases: ['阿尔法作品'],
     release_dates: ['2024-02', '2025-01'],
     tags: [{ name: '校园', category: '场景' }],
   },
@@ -35,14 +36,50 @@ describe('library filtering', () => {
     expect(filterWorks(works, { story: { 纯爱: true } }, 'beta', 'name-asc').map((work) => work.title)).toEqual(['Beta']);
   });
 
+  it('matches hidden search aliases without changing the displayed title', () => {
+    const result = filterWorks(works, {}, '阿尔法', 'name-asc');
+    expect(result.map((work) => work.title)).toEqual(['Alpha']);
+  });
+
   it('keeps time and name sorting deterministic', () => {
     expect(filterWorks(works, {}, '', 'time-desc').map((work) => work.title)).toEqual(['Alpha', 'Beta']);
     expect(filterWorks(works, {}, '', 'name-desc').map((work) => work.title)).toEqual(['Beta', 'Alpha']);
   });
+
+  it('shows only works containing a favorite character when favorite mode is active', () => {
+    const characterWorks = [
+      { ...works[0], tags: [...(works[0].tags || []), { name: '枫', category: '人物' }] },
+      { ...works[1], tags: [...(works[1].tags || []), { name: '铃', category: '人物' }] },
+    ];
+    expect(filterWorks(characterWorks, {}, '', 'name-asc', ['枫'], true).map((work) => work.title)).toEqual(['Alpha']);
+    expect(filterWorks(characterWorks, {}, 'beta', 'name-asc', ['枫'], true)).toEqual([]);
+    expect(filterWorks(characterWorks, {}, '', 'name-asc', [], true)).toEqual([]);
+  });
 });
 
 describe('library pagination', () => {
+  it('uses both axes to fill desktop and secondary-display grids', () => {
+    expect(calculateCoverGridLayout(1864, 936, 64, 16)).toMatchObject({ columns: 9, rows: 3 });
+    expect(calculateCoverGridLayout(1472, 710, 64, 16)).toMatchObject({ columns: 6, rows: 2 });
+    expect(calculateCoverGridLayout(1136, 512, 64, 16)).toMatchObject({ columns: 7, rows: 2 });
+  });
+
   it('keeps nearby pages and a compact gap marker', () => {
     expect(paginationItems(5, 10)).toEqual([1, 'ellipsis', 3, 4, 5, 6, 7, 10]);
+  });
+
+  it('requests covers only for the supplied visible works and removes duplicates', () => {
+    const visible = [
+      { ...works[0], cover_path: 'A.jpg' },
+      { ...works[1], cover_path: 'A.jpg' },
+      { ...works[1], id: 3, cover_path: 'B.jpg' },
+    ];
+    expect(coverPathsForWorks(visible)).toEqual(['A.jpg', 'B.jpg']);
+  });
+
+  it('selects the target page before its covers are requested', () => {
+    const manyWorks = Array.from({ length: 7 }, (_, index) => ({ ...works[0], id: index + 1, title: `Work ${index + 1}` }));
+    expect(worksForPage(manyWorks, 2, 3).map((work) => work.id)).toEqual([4, 5, 6]);
+    expect(worksForPage(manyWorks, 3, 3).map((work) => work.id)).toEqual([7]);
   });
 });

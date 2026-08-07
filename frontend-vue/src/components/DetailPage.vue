@@ -58,12 +58,24 @@ const synopsis = computed(() => String(work.value?.description || '（暂无简�
 function imageError(event: Event): void {
   (event.currentTarget as HTMLImageElement).style.display = 'none';
 }
+
+function handleTagClick(row: DetailRow, tag: TagSummary): void {
+  if (row.label === '角色') {
+    void library.toggleFavoriteCharacter(tag.name);
+  } else if (row.filter) {
+    library.jumpToSingleFilter(row.filter, tag.name);
+  }
+}
+
+function tagTitle(row: DetailRow, tag: TagSummary): string | undefined {
+  if (row.label !== '角色') return undefined;
+  return library.isFavoriteCharacter(tag.name) ? '取消收藏角色' : '收藏角色';
+}
 </script>
 
 <template>
   <div class="page" :class="{ active: navigation.activePage === 'page-detail' }" id="page-detail">
     <div class="detail">
-      <button type="button" class="page-back" @click="navigation.showPage('page-home')">返回</button>
       <div v-if="work" class="detail-layout">
         <div class="detail-left">
           <div class="detail-cover" id="detailCover">
@@ -80,7 +92,7 @@ function imageError(event: Event): void {
             <div class="detail-tags" id="detailTags">
               <div v-for="row in detailRows" :key="row.label" class="detail-tag-row" :class="{ jumpable: Boolean(row.filter) }">
                 <span class="detail-section-title">{{ row.label }}</span>
-                <button v-for="tag in row.tags" :key="`${row.label}-${tag.name}`" class="detail-tag" :class="{ clickable: Boolean(row.filter) }" @click="row.filter && library.jumpToSingleFilter(row.filter, tag.name)">{{ tag.name }}</button>
+                <button v-for="tag in row.tags" :key="`${row.label}-${tag.name}`" class="detail-tag" :class="{ clickable: Boolean(row.filter), favoritable: row.label === '角色', favorite: row.label === '角色' && library.isFavoriteCharacter(tag.name) }" :title="tagTitle(row, tag)" :aria-pressed="row.label === '角色' ? library.isFavoriteCharacter(tag.name) : undefined" @click="handleTagClick(row, tag)"><span v-if="row.label === '角色' && library.isFavoriteCharacter(tag.name)" class="favorite-character-star fluent-icon">&#xE735;</span>{{ tag.name }}</button>
               </div>
             </div>
             <div class="detail-desc" id="detailDesc">
@@ -98,7 +110,7 @@ function imageError(event: Event): void {
                   <img v-if="library.coverUrl(episode.cover_path)" :src="library.coverUrl(episode.cover_path)" style="width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0" @error="imageError">
                   &#127916;
                 </span>
-                <span class="episode-info"><span class="episode-num">第 {{ String(Number(episode.number) || index + 1).padStart(2, '0') }} 集</span><span v-if="episode.subtitle" class="episode-sub">{{ episode.subtitle }}</span></span>
+                <span class="episode-info"><span class="episode-num">第 {{ String(Number(episode.number) || index + 1).padStart(2, '0') }} 集</span><span class="episode-sub">{{ episode.title }}</span></span>
                 <span class="episode-play">&#9654; 播放</span>
               </button>
             </div>

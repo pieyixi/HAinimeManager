@@ -87,110 +87,24 @@ pub fn init_db() -> Database {
             MetaSignature TEXT NOT NULL DEFAULT '',
             CoverSignature TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (WorkId) REFERENCES Works(Id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS FavoriteCharacters (
+            CharacterName TEXT PRIMARY KEY,
+            CreatedAt TEXT NOT NULL DEFAULT (datetime('now','localtime'))
         );",
     )
     .expect("Failed to create tables");
 
-    seed_demo_data(&conn);
+    // Optional search-only aliases were added after the initial portable schema.
+    // SQLite has no IF NOT EXISTS form for ADD COLUMN, so an existing column is harmless here.
+    conn.execute(
+        "ALTER TABLE Works ADD COLUMN SearchAliases TEXT NOT NULL DEFAULT '[]'",
+        [],
+    )
+    .ok();
 
     Database {
         conn: Mutex::new(conn),
-    }
-}
-
-fn seed_demo_data(conn: &Connection) {
-    let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM Works", [], |r| r.get(0))
-        .unwrap_or(0);
-    if count > 0 {
-        return;
-    }
-
-    // Seed tags
-    let tag_data = [
-        ("纯爱", "剧情"),
-        ("催眠", "剧情"),
-        ("NTR", "剧情"),
-        ("校园", "场景"),
-        ("人妻", "人物"),
-        ("萝莉", "人物"),
-        ("妹系", "人物"),
-        ("巨乳", "属性"),
-        ("黑丝", "属性"),
-        ("眼镜", "属性"),
-        ("PoRO", "制作"),
-        ("Queen Bee", "制作"),
-        ("Poro", "制作"),
-    ];
-
-    let mut tag_ids = Vec::new();
-    for (name, cat) in &tag_data {
-        conn.execute(
-            "INSERT OR IGNORE INTO Tags (Name, Category) VALUES (?1, ?2)",
-            params![name, cat],
-        )
-        .ok();
-        let id: i64 = conn
-            .query_row("SELECT Id FROM Tags WHERE Name = ?1", params![name], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        tag_ids.push((*name, id));
-    }
-
-    let tag_id_map: std::collections::HashMap<&str, i64> =
-        tag_ids.iter().map(|(n, i)| (*n, *i)).collect();
-
-    // Seed works
-    let works = vec![
-        ("催眠学园", 2024, 7, "PoRO", "主人公・藤堂隆之介は、ごく普通の高校生活を送っていた。ある日偶然手に入れた「催眠の技法」を試したことで、彼の日常は一変する。",
-         vec![("第1話", "覚醒の刻"), ("第2話", "操りの代償")], vec!["校园", "催眠", "纯爱"]),
-        ("妻の秘密", 2023, 12, "Queen Bee", "共働きの夫婦。最近、妻の帰りが遅い。浮気の疑念を抱きながらも、確かめる勇気が出ない主人公。",
-         vec![("第1話", "疑惑の始まり")], vec!["人妻", "NTR"]),
-        ("星空のメモリア", 2024, 3, "Poro", "夏休み、田舎に帰省した主人公。そこで再会した幼馴染の妹。",
-         vec![("第1話", "再会"), ("第2話", "距離"), ("第3話", "告白")], vec!["纯爱", "妹系"]),
-        ("甘い誘惑", 2024, 6, "PoRO", "取引先の美人担当者。打ち合わせのたびに、彼女の甘い香りに惑わされてしまう。",
-         vec![("第1話", "出会い"), ("第2話", "誘惑")], vec!["巨乳", "黑丝", "人妻"]),
-        ("放課後の教室", 2023, 9, "Queen Bee", "放課後の教室。窓の外には夕日。二人だけの秘密の時間。",
-         vec![("第1話", ""), ("第2話", ""), ("第3話", ""), ("第4話", "")], vec!["校园", "萝莉", "眼镜"]),
-        ("闇の契約", 2024, 1, "Poro", "ある日、謎の少女と契約を交わした。その代償として、大切なものを失っていく。",
-         vec![("第1話", "契約")], vec!["NTR", "催眠"]),
-    ];
-
-    for (title, year, month, studio, desc, episodes, tags) in &works {
-        conn.execute(
-            "INSERT INTO Works (Title, Year, Month, Studio, Description, FolderPath) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![title, year, month, studio, desc, format!("D:\\HAnime\\{}", title)],
-        ).ok();
-        let work_id: i64 = conn.last_insert_rowid();
-
-        for (i, (ep_title, ep_sub)) in episodes.iter().enumerate() {
-            let ep_display = if ep_sub.is_empty() {
-                ep_title.to_string()
-            } else {
-                format!("{} {}", ep_title, ep_sub)
-            };
-            conn.execute(
-                "INSERT INTO Episodes (WorkId, Number, Title, VideoPath) VALUES (?1, ?2, ?3, ?4)",
-                params![
-                    work_id,
-                    (i + 1) as i32,
-                    ep_display,
-                    format!("D:\\HAnime\\{}\\{}.mp4", title, ep_title)
-                ],
-            )
-            .ok();
-        }
-
-        for tag_name in tags {
-            if let Some(tid) = tag_id_map.get(tag_name) {
-                conn.execute(
-                    "INSERT OR IGNORE INTO WorkTags (WorkId, TagId) VALUES (?1, ?2)",
-                    params![work_id, tid],
-                )
-                .ok();
-            }
-        }
     }
 }
 

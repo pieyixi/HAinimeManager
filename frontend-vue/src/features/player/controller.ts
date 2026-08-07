@@ -9,7 +9,7 @@ import { usePlayerStore, type PlayerFitMode, type PlayerLoopMode, type PlayerMod
 import { registerPlayerCommands, type PlayerCommandApi } from './commands';
 import { createPlayerLayout } from './layout';
 import { formatPlayerTime, nextPlayerEpisodeIndex, parsePlayerTime, playerFitModes, playerEpisodeNumber } from './model';
-import { delay, initLibMpv, mpvCommand, mpvPlugin, mpvSetProperty, safeMpvGetProperty } from './mpv';
+import { delay, initLibMpv, listenMpvEvents, mpvCommand, mpvPlugin, mpvSetProperty, safeMpvGetProperty } from './mpv';
 import { createPlayerThumbnails } from './thumbnails';
 
 function errorText(error: unknown): string {
@@ -28,6 +28,13 @@ export function installPlayerController(): () => void {
   let keySeekTimer: number | null = null;
   let keySeekInterval: number | null = null;
   let pointerSeekWasPaused = false;
+  let firstFrameWaiter: { fileLoaded: boolean; resolve: () => void } | null = null;
+  let stopMpvEvents: (() => void) | null = null;
+  const mpvEventsReady = listenMpvEvents((event) => {
+    if (!firstFrameWaiter) return;
+    if (event.event === 'file-loaded') firstFrameWaiter.fileLoaded = true;
+    if (event.event === 'playback-restart' && firstFrameWaiter.fileLoaded) firstFrameWaiter.resolve();
+  }).then((stop) => { stopMpvEvents = stop; }).catch(() => undefined);
 
   function message(kind = '', text = ''): void {
     player.messageKind = kind;
@@ -85,17 +92,54 @@ export function installPlayerController(): () => void {
     }
   }
 
-  async function waitForFirstFrame(): Promise<void> {
-    const deadline = Date.now() + 4000;
+  async function waitForFirstFrame(expectedPath: string): Promise<boolean> {
+    let eventResolved = false;
+    let frameReady = false;
+    let waiter!: { fileLoaded: boolean; resolve: () => void };
+    const eventReady = new Promise<void>((resolve) => {
+      waiter = {
+        fileLoaded: false,
+        resolve: () => {
+          eventResolved = true;
+          frameReady = true;
+          if (firstFrameWaiter === waiter) firstFrameWaiter = null;
+          resolve();
+        },
+      };
+      firstFrameWaiter = waiter;
+    });
+    const normalizedExpectedPath = expectedPath.replace(/\\/g, '/').toLowerCase();
+    const deadline = Date.now() + 12000;
     while (Date.now() < deadline) {
-      const [duration, time] = await Promise.all([
+      if (eventResolved) break;
+      const [path, duration, time] = await Promise.all([
+        safeMpvGetProperty<string>('path', 'string'),
         safeMpvGetProperty<number>('duration', 'double'),
         safeMpvGetProperty<number>('time-pos', 'double'),
       ]);
-      if (Number(duration) > 0 && Number.isFinite(Number(time))) { await delay(160); break; }
+      const normalizedPath = String(path || '').replace(/\\/g, '/').toLowerCase();
+      if (normalizedPath === normalizedExpectedPath && Number(duration) > 0 && Number.isFinite(Number(time))) {
+        await Promise.race([eventReady, delay(180)]);
+        frameReady = true;
+        break;
+      }
       await delay(80);
     }
+    if (firstFrameWaiter === waiter) firstFrameWaiter = null;
+    // Keep the poster for two compositor frames after mpv reports playback-restart.
+    // This prevents exposing the native surface while its swap chain is still black.
+    if (frameReady) await delay(48);
+    return frameReady;
+  }
+
+  async function commitVideoReveal(): Promise<void> {
+    await layout.syncBounds();
+    await nextTick();
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    player.nativeVisible = true;
     player.videoLoading = false;
+    await nextTick();
+    await layout.syncBounds();
   }
 
   async function applyFitMode(): Promise<void> {
@@ -153,25 +197,35 @@ export function installPlayerController(): () => void {
     resetPlaybackState(mode);
     thumbnails.reset(episode.video_path);
     message('info', '正在启动 mpv 播放内核...');
+    try {
+      await mpvEventsReady;
+      if (!player.libmpvReady) {
+        await initLibMpv();
+        player.libmpvReady = true;
+      }
+    } catch (error) {
+      player.videoLoading = false;
+      player.hint = 'mpv 未启动';
+      message('err', errorText(error));
+      return;
+    }
     navigation.showPage('page-player');
     await nextTick();
-    void layout.syncBounds();
+    await layout.syncBounds();
     stopPolling();
     try {
-      if (!player.libmpvReady) { await initLibMpv(); player.libmpvReady = true; }
       await layout.syncBounds();
+      const firstFrame = waitForFirstFrame(episode.video_path);
       await mpvCommand('loadfile', [episode.video_path]);
-      await delay(140);
-      player.nativeVisible = true;
-      await layout.syncBounds();
-      layout.scheduleSync();
       await applyFitMode();
       await setLoopMode('off');
       await setVolume(player.volume);
       player.muted = Boolean(await safeMpvGetProperty<boolean>('mute', 'flag'));
       await pollStatus();
       void thumbnails.prefetch(episode.video_path, player.duration);
-      await waitForFirstFrame();
+      if (!await firstFrame) throw new Error('视频首帧加载超时');
+      await commitVideoReveal();
+      layout.scheduleSync();
       player.hint = '';
       message();
       let tick = 0;
@@ -198,14 +252,20 @@ export function installPlayerController(): () => void {
   async function returnFromPlayer(): Promise<void> {
     stopPolling();
     stopKeySeek();
-    thumbnails.reset('');
+    const thumbnailRelease = thumbnails.release();
     const mode = player.mode;
     if (player.fullscreen) await setFullscreen(false);
     player.videoLoading = true;
+    player.nativeVisible = false;
+    await nextTick();
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     navigation.showPage(mode === 'archive' ? 'page-archive' : 'page-detail');
-    try { await mpvPlugin('destroy', { windowLabel: 'main' }); } catch { /* Already stopped. */ }
+    await Promise.all([
+      thumbnailRelease,
+      mpvCommand('stop').catch(() => undefined),
+      mpvCommand('playlist-clear').catch(() => undefined),
+    ]);
     Object.assign(player, {
-      libmpvReady: false,
       nativeVisible: false,
       videoLoading: false,
       episode: null,
@@ -245,16 +305,18 @@ export function installPlayerController(): () => void {
     player.episode = episode;
     player.title = `${workTitle()} / 第${playerEpisodeNumber(episode)}集`;
     thumbnails.reset(episode.video_path);
-    Object.assign(player, { currentTime: 0, duration: 0, timeInput: '00:00', paused: false, handlingEnd: true, videoLoading: true });
+    Object.assign(player, { currentTime: 0, duration: 0, timeInput: '00:00', paused: false, handlingEnd: true, videoLoading: true, nativeVisible: false });
     try {
+      const firstFrame = waitForFirstFrame(episode.video_path);
       await mpvCommand('loadfile', [episode.video_path]);
       await mpvSetProperty('pause', false);
-      await delay(120);
       await applyFitMode();
       await setLoopMode(player.loopMode);
       await pollStatus();
       void thumbnails.prefetch(episode.video_path, player.duration);
-      await waitForFirstFrame();
+      if (!await firstFrame) throw new Error('视频首帧加载超时');
+      await commitVideoReveal();
+      layout.scheduleSync();
     } finally {
       player.videoLoading = false;
       player.handlingEnd = false;
@@ -472,7 +534,7 @@ export function installPlayerController(): () => void {
     captureCurrentFrame,
     scheduleBoundsSync: layout.scheduleSync,
     showFullscreenControls: layout.showFullscreenControls,
-    hideFullscreenControls: () => layout.hideFullscreenControls(applyFitMode),
+    hideFullscreenControls: layout.hideFullscreenControls,
   };
 
   registerPlayerCommands(commands);
@@ -482,6 +544,8 @@ export function installPlayerController(): () => void {
     stopKeySeek();
     thumbnails.dispose();
     layout.dispose();
+    firstFrameWaiter = null;
+    stopMpvEvents?.();
     if (player.libmpvReady) void mpvPlugin('destroy', { windowLabel: 'main' }).catch(() => undefined);
     player.libmpvReady = false;
     player.nativeVisible = false;

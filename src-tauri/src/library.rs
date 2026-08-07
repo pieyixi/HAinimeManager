@@ -118,7 +118,14 @@ fn get_work_detail(work_id: i64, db: State<Database>) -> Result<WorkDetail, Stri
 fn get_tags(db: State<Database>) -> Result<Vec<Tag>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT Id, Name, Category FROM Tags ORDER BY Category, Name")
+        .prepare(
+            "SELECT t.Id, t.Name, t.Category
+             FROM Tags t
+             WHERE EXISTS (
+                 SELECT 1 FROM WorkTags wt WHERE wt.TagId = t.Id
+             )
+             ORDER BY t.Category, t.Name",
+        )
         .map_err(|e| e.to_string())?;
 
     let tags = stmt
@@ -170,12 +177,65 @@ fn imported_work_is_available(
         })
 }
 
+fn read_favorite_characters(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut statement = conn
+        .prepare("SELECT CharacterName FROM FavoriteCharacters ORDER BY CharacterName COLLATE NOCASE")
+        .map_err(|e| e.to_string())?;
+    let favorites = statement
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(favorites)
+}
+
+fn write_character_favorite(
+    conn: &rusqlite::Connection,
+    character_name: &str,
+    favorite: bool,
+) -> Result<Vec<String>, String> {
+    let name = character_name.trim();
+    if name.is_empty() {
+        return Err("角色名不能为空".to_string());
+    }
+    if favorite {
+        conn.execute(
+            "INSERT OR IGNORE INTO FavoriteCharacters (CharacterName) VALUES (?1)",
+            params![name],
+        )
+        .map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "DELETE FROM FavoriteCharacters WHERE CharacterName = ?1",
+            params![name],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    read_favorite_characters(conn)
+}
+
+#[tauri::command]
+fn get_favorite_characters(db: State<Database>) -> Result<Vec<String>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    read_favorite_characters(&conn)
+}
+
+#[tauri::command]
+fn set_character_favorite(
+    character_name: String,
+    favorite: bool,
+    db: State<Database>,
+) -> Result<Vec<String>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    write_character_favorite(&conn, &character_name, favorite)
+}
+
 #[tauri::command]
 fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
     let mut stmt = conn.prepare(
-        "SELECT w.Id, w.Title, w.Year, w.Month, w.Studio, w.Description, w.CoverPath, w.FolderPath,
+        "SELECT w.Id, w.Title, w.Year, w.Month, w.Studio, w.Description, w.CoverPath, w.FolderPath, w.SearchAliases,
                 (SELECT COUNT(*) FROM Episodes WHERE WorkId = w.Id) as EpisodeCount
          FROM Works w ORDER BY w.UpdatedAt DESC"
     ).map_err(|e| e.to_string())?;
@@ -188,6 +248,7 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
         String,
         Option<String>,
         Option<String>,
+        String,
         String,
         i64,
     )> = stmt
@@ -202,6 +263,7 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
                 row.get(6)?,
                 row.get(7)?,
                 row.get(8)?,
+                row.get(9)?,
             ))
         })
         .map_err(|e| e.to_string())?
@@ -234,7 +296,7 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
 
     let result: Vec<WorkWithTags> = works
         .into_iter()
-        .filter(|(id, _, _, _, _, _, cover_path, folder_path, _)| {
+        .filter(|(id, _, _, _, _, _, cover_path, folder_path, _, _)| {
             imported_work_is_available(&conn, *id, folder_path, cover_path.as_deref())
         })
         .map(
@@ -247,6 +309,7 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
                 description,
                 cover_path,
                 folder_path,
+                search_aliases,
                 episode_count,
             )| {
                 let release_dates = read_work_release_months(&folder_path, year, month);
@@ -261,6 +324,7 @@ fn get_all_works_with_tags(db: State<Database>) -> Result<Vec<WorkWithTags>, Str
                     folder_path,
                     episode_count,
                     release_dates,
+                    search_aliases: serde_json::from_str(&search_aliases).unwrap_or_default(),
                     tags: tags_map.remove(&id).unwrap_or_default(),
                 }
             },
@@ -311,15 +375,30 @@ fn read_work_release_months(folder_path: &str, fallback_year: i32, fallback_mont
     months
 }
 
+fn delete_work_record(conn: &mut rusqlite::Connection, work_id: i64) -> Result<bool, String> {
+    let transaction = conn.transaction().map_err(|e| e.to_string())?;
+    transaction
+        .execute("DELETE FROM LibrarySnapshots WHERE WorkId = ?1", params![work_id])
+        .map_err(|e| e.to_string())?;
+    transaction
+        .execute("DELETE FROM WorkTags WHERE WorkId = ?1", params![work_id])
+        .map_err(|e| e.to_string())?;
+    transaction
+        .execute("DELETE FROM Episodes WHERE WorkId = ?1", params![work_id])
+        .map_err(|e| e.to_string())?;
+    let deleted = transaction
+        .execute("DELETE FROM Works WHERE Id = ?1", params![work_id])
+        .map_err(|e| e.to_string())?;
+    transaction.commit().map_err(|e| e.to_string())?;
+    Ok(deleted > 0)
+}
+
 #[tauri::command]
 fn delete_work(work_id: i64, db: State<Database>) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM WorkTags WHERE WorkId = ?1", params![work_id])
-        .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM Episodes WHERE WorkId = ?1", params![work_id])
-        .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM Works WHERE Id = ?1", params![work_id])
-        .map_err(|e| e.to_string())?;
+    let mut conn = db.conn.lock().map_err(|e| e.to_string())?;
+    if !delete_work_record(&mut conn, work_id)? {
+        return Err("数据库中不存在该作品".to_string());
+    }
     Ok(())
 }
 
@@ -383,6 +462,66 @@ mod imported_work_visibility_tests {
             Some(&cover.to_string_lossy())
         ));
         std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod delete_work_record_tests {
+    use super::delete_work_record;
+    use rusqlite::Connection;
+
+    #[test]
+    fn removes_only_the_database_graph_for_the_selected_work() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE Works (Id INTEGER PRIMARY KEY, Title TEXT NOT NULL);
+             CREATE TABLE Episodes (Id INTEGER PRIMARY KEY, WorkId INTEGER NOT NULL);
+             CREATE TABLE WorkTags (WorkId INTEGER NOT NULL, TagId INTEGER NOT NULL);
+             CREATE TABLE LibrarySnapshots (WorkId INTEGER PRIMARY KEY, MetaSignature TEXT NOT NULL);
+             INSERT INTO Works VALUES (1, 'removed'), (2, 'kept');
+             INSERT INTO Episodes VALUES (10, 1), (20, 2);
+             INSERT INTO WorkTags VALUES (1, 100), (2, 200);
+             INSERT INTO LibrarySnapshots VALUES (1, 'old'), (2, 'kept');",
+        )
+        .unwrap();
+
+        assert!(delete_work_record(&mut conn, 1).unwrap());
+        for table in ["Works", "Episodes", "WorkTags", "LibrarySnapshots"] {
+            let removed: i64 = conn
+                .query_row(
+                    &format!("SELECT COUNT(*) FROM {table} WHERE {}=1", if table == "Works" { "Id" } else { "WorkId" }),
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(removed, 0, "{table} still contains the deleted work");
+        }
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM Works WHERE Id=2", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+        assert!(!delete_work_record(&mut conn, 999).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod favorite_character_tests {
+    use super::{read_favorite_characters, write_character_favorite};
+    use rusqlite::Connection;
+
+    #[test]
+    fn toggles_unique_character_names_without_touching_library_metadata() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE FavoriteCharacters (
+                CharacterName TEXT PRIMARY KEY,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+            );",
+        )
+        .unwrap();
+
+        assert_eq!(write_character_favorite(&conn, "  枫  ", true).unwrap(), vec!["枫"]);
+        assert_eq!(write_character_favorite(&conn, "枫", true).unwrap(), vec!["枫"]);
+        assert_eq!(write_character_favorite(&conn, "铃", true).unwrap(), vec!["枫", "铃"]);
+        assert_eq!(write_character_favorite(&conn, "枫", false).unwrap(), vec!["铃"]);
+        assert_eq!(read_favorite_characters(&conn).unwrap(), vec!["铃"]);
     }
 }
 

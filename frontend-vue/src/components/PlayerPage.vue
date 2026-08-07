@@ -6,7 +6,8 @@ import type { PlayerEpisode } from '../stores/app';
 import { useAppStore } from '../stores/app';
 import { useLibraryStore } from '../stores/library';
 import { useNavigationStore } from '../stores/navigation';
-import { usePlayerStore, type PlayerMaskRect } from '../stores/player';
+import { usePlayerStore, type PlayerVideoHole } from '../stores/player';
+import ShellBackButton from './ShellBackButton.vue';
 
 const app = useAppStore();
 const library = useLibraryStore();
@@ -33,8 +34,7 @@ const seekProgress = computed(() => player.duration > 0 ? Math.max(0, Math.min(1
 const speedLabel = computed(() => Math.abs(player.speed - 1) < 0.01 ? '倍速' : formatPlayerSpeed(player.speed));
 const previewStyle = computed(() => ({ left: `${player.previewLeft}px` }));
 const previewFrameStyle = computed(() => ({ backgroundImage: player.previewImage ? `url("${player.previewImage}")` : '' }));
-
-function maskStyle(rect: PlayerMaskRect): Record<string, string> {
+function videoHoleStyle(rect: PlayerVideoHole): Record<string, string> {
   return { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` };
 }
 
@@ -124,18 +124,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page" :class="{ active: navigation.activePage === 'page-player' }" id="page-player">
-    <div class="player-mask" id="playerMaskTop" :style="maskStyle(player.maskTop)"></div>
-    <div class="player-mask" id="playerMaskRight" :style="maskStyle(player.maskRight)"></div>
-    <div class="player-mask" id="playerMaskBottom" :style="maskStyle(player.maskBottom)"></div>
-    <div class="player-mask" id="playerMaskLeft" :style="maskStyle(player.maskLeft)"></div>
+    <div class="player-backplate" id="playerBackplate" :style="videoHoleStyle(player.videoHole)"></div>
     <div class="player-fullscreen-trigger" @mouseenter="playerCommands.showFullscreenControls"></div>
     <div class="player-page">
       <div class="player-shell">
         <div class="player-head">
-          <button type="button" class="page-back" @click="playerCommands.returnFromPlayer">返回</button>
+          <div class="player-head-drag-region" data-tauri-drag-region></div>
+          <div class="player-back-slot">
+            <ShellBackButton @click="playerCommands.returnFromPlayer" />
+          </div>
           <div class="player-title" id="playerTitle">{{ player.title }}</div>
           <div class="player-head-actions">
-            <button class="player-head-btn secondary" @click="playerCommands.openExternal" title="使用系统播放器打开">外部打开</button>
+            <button class="player-head-btn secondary" @click="playerCommands.openExternal" title="使用系统播放器打开"><span class="fluent-icon">&#xE8A7;</span><span>外部打开</span></button>
           </div>
         </div>
         <div class="player-workspace" :class="{ 'sidebar-collapsed': player.sidebarCollapsed }">

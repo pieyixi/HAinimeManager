@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicedoc/schema@latest/tauri-conf.schema.json",
   "productName": "HAnimeManager",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "identifier": "com.hanime.manager",
   "build": {
     "frontendDist": "../frontend-vue/dist",
@@ -17,7 +17,9 @@
         "width": 1360,
         "height": 900,
         "resizable": true,
-        "transparent": true
+        "transparent": true,
+        "decorations": false,
+        "shadow": true
       }
     ]
   },

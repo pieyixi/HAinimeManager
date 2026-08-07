@@ -43,13 +43,14 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         candidates.iter().find(|p| p.exists()).cloned()
     };
 
-    let (title, studio, synopsis, tag_map, episode_list, characters, release) =
+    let (title, search_aliases, studio, synopsis, tag_map, episode_list, characters, release) =
         if let Some(jp) = json_path {
             let content = std::fs::read_to_string(&jp).map_err(|e| format!("读JSON失败: {}", e))?;
             let m: WorkMeta =
                 serde_json::from_str(&content).map_err(|e| format!("解析JSON失败: {}", e))?;
             (
                 m.title,
+                m.search_aliases,
                 m.studio.unwrap_or_default(),
                 m.synopsis.unwrap_or_default(),
                 m.tag.unwrap_or_default(),
@@ -60,6 +61,7 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
         } else {
             (
                 dir_name.clone(),
+                Vec::new(),
                 String::new(),
                 String::new(),
                 std::collections::HashMap::new(),
@@ -94,8 +96,8 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
 
     let work_id: i64 = if let Some(existing_id) = existing_id {
         conn.execute(
-            "UPDATE Works SET Title=?1,Year=?2,Month=?3,Studio=?4,Description=?5,FolderPath=?6,CoverPath=NULL,UpdatedAt=datetime('now','localtime') WHERE Id=?7",
-            params![title, year, month, studio, synopsis, dir_path, existing_id],
+            "UPDATE Works SET Title=?1,Year=?2,Month=?3,Studio=?4,Description=?5,FolderPath=?6,SearchAliases=?7,CoverPath=NULL,UpdatedAt=datetime('now','localtime') WHERE Id=?8",
+            params![title, year, month, studio, synopsis, dir_path, serde_json::to_string(&search_aliases).map_err(|e| e.to_string())?, existing_id],
         ).map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM WorkTags WHERE WorkId=?1", params![existing_id])
             .map_err(|e| e.to_string())?;
@@ -103,8 +105,8 @@ fn import_work_dir(conn: &Connection, dir_path: &str) -> Result<i64, String> {
             .map_err(|e| e.to_string())?;
         existing_id
     } else {
-        conn.execute("INSERT INTO Works (Title,Year,Month,Studio,Description,FolderPath) VALUES (?1,?2,?3,?4,?5,?6)",
-            params![title, year, month, studio, synopsis, dir_path]).map_err(|e| e.to_string())?;
+        conn.execute("INSERT INTO Works (Title,Year,Month,Studio,Description,FolderPath,SearchAliases) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![title, year, month, studio, synopsis, dir_path, serde_json::to_string(&search_aliases).map_err(|e| e.to_string())?]).map_err(|e| e.to_string())?;
         conn.last_insert_rowid()
     };
 

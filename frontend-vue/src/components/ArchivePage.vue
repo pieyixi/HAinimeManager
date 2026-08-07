@@ -37,7 +37,6 @@ function setEpisodeTags(episode: ArchiveEpisode, category: keyof ArchiveEpisode[
 <template>
   <div class="page" :class="{ active: navigation.activePage === 'page-archive' }" id="page-archive">
     <div class="archive">
-      <button type="button" class="page-back" @click="archive.openUnarchivedPage">返回</button>
       <div class="archive-title">建档助手</div>
       <div class="archive-shell">
         <div class="archive-panel archive-sidebar">
@@ -84,6 +83,7 @@ function setEpisodeTags(episode: ArchiveEpisode, category: keyof ArchiveEpisode[
           <div style="height:16px"></div>
           <div class="archive-section-title">元数据</div>
           <div class="archive-field"><div class="archive-label">标题</div><input v-model="archive.title" class="archive-input" id="archiveTitle"></div>
+          <div class="archive-field"><div class="archive-label">搜索别名（可选，每行一个）</div><textarea v-model="archive.searchAliasesText" class="archive-textarea archive-aliases" placeholder="仅用于搜索，不会显示在作品详情中"></textarea></div>
           <div class="archive-field"><div class="archive-label">制作商</div><input v-model="archive.studio" class="archive-input" id="archiveStudio"></div>
           <div class="archive-field"><div class="archive-label">女主 / 角色（每行一个）</div><textarea v-model="archive.charactersText" class="archive-textarea" id="archiveCharacters"></textarea></div>
           <div class="archive-field"><div class="archive-label">简介</div><textarea v-model="archive.synopsis" class="archive-textarea" id="archiveSynopsis"></textarea></div>

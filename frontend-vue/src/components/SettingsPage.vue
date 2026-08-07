@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { useArchiveStore } from '../stores/archive';
 import { useAppStore } from '../stores/app';
 import { useNavigationStore } from '../stores/navigation';
-import { type ConsoleItem, type LibraryScan, useSettingsStore } from '../stores/settings';
+import { type ConsoleItem, type LibraryScan, isMissingDirectoryItem, useSettingsStore } from '../stores/settings';
 
 const app = useAppStore();
 const settings = useSettingsStore();
@@ -45,7 +45,6 @@ function duplicateSize(bytes: number): string {
 <template>
   <div class="page" :class="{ active: navigation.activePage === 'page-settings' }" id="page-settings">
     <div class="settings">
-      <button type="button" class="page-back" @click="navigation.showPage('page-home')">返回</button>
       <div class="settings-title">设置</div>
       <div class="console-shell">
         <section class="settings-overview" aria-label="媒体库概览">
@@ -74,7 +73,7 @@ function duplicateSize(bytes: number): string {
           <section class="console-section console-library">
             <div class="console-section-head">
               <h2>媒体库</h2>
-              <button class="btn-primary" id="consoleScanButton" :disabled="settings.scanning" @click="settings.scanLibraryChanges">扫描变化</button>
+              <button class="btn-primary" id="consoleScanButton" :disabled="settings.busy" @click="settings.scanLibraryChanges">扫描变化</button>
             </div>
             <div class="settings-field console-path-row">
               <input v-model="settings.mediaPath" class="s-input" type="text" id="mediaPath">
@@ -107,7 +106,8 @@ function duplicateSize(bytes: number): string {
                       </div>
                       <div class="console-row-actions">
                         <button v-if="group.key === 'new_episode_works'" class="btn-primary compact" @click="continueArchive(group.key, index)">继续建档</button>
-                        <button class="btn-secondary" @click="settings.openConsoleFolder(group.key, index)">打开文件夹</button>
+                        <button v-if="group.key === 'attention_works' && isMissingDirectoryItem(item)" class="btn-secondary btn-danger" @click="settings.deleteMissingDatabaseRecord(index)">删除记录</button>
+                        <button v-else class="btn-secondary" @click="settings.openConsoleFolder(group.key, index)">打开文件夹</button>
                       </div>
                     </div>
                   </div>
@@ -119,9 +119,9 @@ function duplicateSize(bytes: number): string {
           <section class="console-section data-management">
             <div class="console-section-head"><h2>数据管理</h2></div>
             <div class="backup-actions">
-              <button class="btn-secondary" @click="settings.backupDatabase">备份数据库</button>
-              <button class="btn-secondary" @click="settings.backupDataPackage">备份资料包</button>
-              <button class="btn-secondary" @click="settings.restoreDatabase">恢复数据库</button>
+              <button class="btn-secondary" :disabled="settings.busy" @click="settings.backupDatabase">备份数据库</button>
+              <button class="btn-secondary" :disabled="settings.busy" @click="settings.backupDataPackage">备份资料包</button>
+              <button class="btn-secondary" :disabled="settings.busy" @click="settings.restoreDatabase">恢复数据库</button>
             </div>
             <input v-model="settings.backupPath" class="s-input console-backup-path" type="text" id="dbFilePath" placeholder="备份或恢复路径，例如 D:\Ark\hanime-data-backup.zip">
             <div id="dbMsg"><div v-if="settings.databaseMessage" class="settings-msg" :class="settings.databaseMessage.kind">{{ settings.databaseMessage.text }}</div></div>
@@ -132,11 +132,11 @@ function duplicateSize(bytes: number): string {
             <div id="duplicateMsg">
               <div v-if="settings.duplicateMessage" class="settings-msg" :class="settings.duplicateMessage.kind">{{ settings.duplicateMessage.text }}</div>
               <div v-if="settings.duplicates.length" style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
-                <div v-for="(group, groupIndex) in settings.duplicates" :key="groupIndex" style="border:1px solid var(--line);border-radius:8px;background:#fff;padding:10px">
-                  <div style="font-size:12px;color:#6b7280;margin-bottom:6px">重复组 {{ groupIndex + 1 }}</div>
-                  <div v-for="item in group.items" :key="item.folder_path" style="font-size:12px;line-height:1.6;padding:4px 0;border-top:1px solid #f1f3f6">
-                    <div><strong>{{ item.title }}</strong> <span style="color:#6b7280">({{ item.source }} / {{ item.video_count }}集 / {{ duplicateSize(item.total_size) }})</span></div>
-                    <div style="color:#6b7280;word-break:break-all">{{ item.folder_path }}</div>
+                <div v-for="(group, groupIndex) in settings.duplicates" :key="groupIndex" class="duplicate-group">
+                  <div class="duplicate-group-title">重复组 {{ groupIndex + 1 }}</div>
+                  <div v-for="item in group.items" :key="item.folder_path" class="duplicate-item">
+                    <div><strong>{{ item.title }}</strong> <span>({{ item.source }} / {{ item.video_count }}集 / {{ duplicateSize(item.total_size) }})</span></div>
+                    <div class="duplicate-path">{{ item.folder_path }}</div>
                   </div>
                 </div>
               </div>

@@ -5,8 +5,23 @@ interface TauriCore {
   convertFileSrc?(path: string): string;
 }
 
+export interface TauriWindowHandle {
+  minimize(): Promise<void>;
+  toggleMaximize(): Promise<void>;
+  close(): Promise<void>;
+  startDragging(): Promise<void>;
+  isMaximized(): Promise<boolean>;
+  onResized(handler: () => void): Promise<() => void>;
+}
+
 interface TauriGlobal {
   core?: TauriCore;
+  event?: {
+    listen<T>(event: string, handler: (event: { payload: T }) => void): Promise<() => void>;
+  };
+  window?: {
+    getCurrentWindow?(): TauriWindowHandle;
+  };
   invoke?: TauriCore['invoke'];
 }
 
@@ -32,8 +47,18 @@ export async function invokeTauri<T>(command: string, args?: InvokeArgs): Promis
   return tauri.invoke<T>(command, args);
 }
 
+export async function listenTauri<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+  const listen = window.__TAURI__?.event?.listen;
+  if (!listen) throw new Error('Tauri event runtime is not connected');
+  return listen<T>(event, ({ payload }) => handler(payload));
+}
+
 export function convertFilePath(path: string): string {
   const convertFileSrc = window.__TAURI__?.core?.convertFileSrc;
   if (convertFileSrc) return convertFileSrc(path);
   return `file:///${path.replace(/\\/g, '/').replace(/^([A-Za-z]):/, '$1:')}`;
+}
+
+export function currentTauriWindow(): TauriWindowHandle | null {
+  return window.__TAURI__?.window?.getCurrentWindow?.() || null;
 }

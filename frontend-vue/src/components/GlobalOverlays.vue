@@ -2,9 +2,11 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useLibraryStore } from '../stores/library';
 import { useNavigationStore } from '../stores/navigation';
+import { useSettingsStore } from '../stores/settings';
 
 const navigation = useNavigationStore();
 const library = useLibraryStore();
+const settings = useSettingsStore();
 const menuElement = ref<HTMLElement | null>(null);
 
 watch(() => navigation.contextMenu.visible, async (visible) => {
@@ -53,6 +55,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <div v-if="settings.backupRunning" class="global-busy-mask" aria-live="polite" aria-busy="true" @contextmenu.prevent>
+    <div class="global-busy-panel">
+      <div class="global-busy-heading"><strong>正在备份资料包</strong><span>{{ settings.progressPercent }}%</span></div>
+      <div class="console-progress-track global-busy-progress"><span :style="{ width: `${settings.progressPercent}%` }"></span></div>
+      <div class="global-busy-text">{{ settings.progressText }}</div>
+      <div class="global-busy-note">备份完成前请保持软件运行</div>
+    </div>
+  </div>
   <div class="modal-mask" :class="{ active: navigation.confirmation.visible }" id="confirmModal" @click.self="navigation.resolveConfirm(false)">
     <div class="modal">
       <div class="modal-title" id="confirmTitle">{{ navigation.confirmation.title || '确认操作' }}</div>
